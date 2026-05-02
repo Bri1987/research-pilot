@@ -10,6 +10,7 @@ if str(PROJECT_ROOT) not in sys.path:
 
 from researchpilot.cards.comparison_table import build_comparison_table
 from researchpilot.ingest.pipeline import ResearchPilotPipeline
+from researchpilot.review.review_diff import make_unified_diff
 
 
 UPLOAD_DIR = PROJECT_ROOT / "data" / "uploads"
@@ -31,12 +32,20 @@ if "claim_verification" not in st.session_state:
     st.session_state["claim_verification"] = []
 if "revised_literature_review" not in st.session_state:
     st.session_state["revised_literature_review"] = ""
+if "review_versions" not in st.session_state:
+    st.session_state["review_versions"] = []
+if "active_review_version" not in st.session_state:
+    st.session_state["active_review_version"] = 0
+if "pending_active_review_version" not in st.session_state:
+    st.session_state["pending_active_review_version"] = None
 
 pipeline: ResearchPilotPipeline = st.session_state["pipeline"]
 paper_cards: dict[str, dict] = st.session_state["paper_cards"]
 literature_review: str = st.session_state["literature_review"]
 claim_verification: list[dict] = st.session_state["claim_verification"]
 revised_literature_review: str = st.session_state["revised_literature_review"]
+review_versions: list[dict] = st.session_state["review_versions"]
+active_review_version: int = st.session_state["active_review_version"]
 
 tab_upload, tab_ask, tab_cards, tab_review, tab_library = st.tabs(
     [
@@ -177,6 +186,7 @@ with tab_cards:
             file_name="paper_comparison.csv",
             mime="text/csv",
             width="stretch",
+            key="download_paper_comparison_csv",
         )
     else:
         st.info("Generate at least one paper card to build a comparison table.")
@@ -199,23 +209,112 @@ with tab_review:
                     st.session_state["literature_review"] = generated_review
                     st.session_state["claim_verification"] = []
                     st.session_state["revised_literature_review"] = ""
+                    st.session_state["review_versions"] = [
+                        {
+                            "label": "v0 Original",
+                            "text": generated_review,
+                            "verification": None,
+                            "source": "generated",
+                            "parent": None,
+                        }
+                    ]
+                    st.session_state["active_review_version"] = 0
+                    st.session_state["current_review_version_idx"] = 0
                     literature_review = generated_review
                     claim_verification = []
                     revised_literature_review = ""
+                    review_versions = st.session_state["review_versions"]
+                    active_review_version = 0
                     st.success("Literature review generated.")
                 except Exception as exc:
                     st.error(f"Literature review generation failed: {exc}")
 
-        if literature_review:
-            st.subheader("Literature Review")
-            st.markdown(literature_review)
-            st.download_button(
-                "Download Markdown",
-                data=literature_review,
-                file_name="literature_review.md",
-                mime="text/markdown",
-                width="stretch",
+        if not review_versions and literature_review:
+            st.session_state["review_versions"] = [
+                {
+                    "label": "v0 Original",
+                    "text": literature_review,
+                    "verification": None,
+                    "source": "generated",
+                    "parent": None,
+                }
+            ]
+            st.session_state["active_review_version"] = 0
+            st.session_state["current_review_version_idx"] = 0
+            review_versions = st.session_state["review_versions"]
+            active_review_version = 0
+
+        if review_versions:
+            st.divider()
+            st.subheader("Review Versions")
+
+            pending_review_idx = st.session_state.get("pending_active_review_version")
+            if (
+                isinstance(pending_review_idx, int)
+                and 0 <= pending_review_idx < len(review_versions)
+            ):
+                st.session_state["active_review_version"] = pending_review_idx
+                st.session_state["current_review_version_idx"] = pending_review_idx
+            st.session_state["pending_active_review_version"] = None
+            active_review_version = st.session_state["active_review_version"]
+
+            max_idx = len(review_versions) - 1
+            default_idx = (
+                active_review_version
+                if isinstance(active_review_version, int)
+                and 0 <= active_review_version <= max_idx
+                else max_idx
             )
+            if (
+                "current_review_version_idx" not in st.session_state
+                or not isinstance(st.session_state["current_review_version_idx"], int)
+                or not 0 <= st.session_state["current_review_version_idx"] <= max_idx
+            ):
+                st.session_state["current_review_version_idx"] = default_idx
+            selected_idx = st.selectbox(
+                "Current review version",
+                options=list(range(len(review_versions))),
+                format_func=lambda i: review_versions[i]["label"],
+                key="current_review_version_idx",
+            )
+            st.session_state["active_review_version"] = selected_idx
+            active_review_version = selected_idx
+
+            current_version = review_versions[selected_idx]
+            current_label = str(current_version.get("label", f"v{selected_idx}"))
+            current_text = str(current_version.get("text", ""))
+            current_verification = current_version.get("verification")
+
+            st.caption(f"Current version: {current_label}")
+            st.markdown(current_text)
+
+            if selected_idx == 0:
+                st.download_button(
+                    "Download Original Literature Review",
+                    data=current_text,
+                    file_name="literature_review.md",
+                    mime="text/markdown",
+                    width="stretch",
+                    key="download_original_review_current_version",
+                )
+            elif selected_idx == len(review_versions) - 1 and revised_literature_review:
+                st.download_button(
+                    "Download Revised Literature Review",
+                    data=revised_literature_review,
+                    file_name="revised_literature_review.md",
+                    mime="text/markdown",
+                    width="stretch",
+                    key="download_revised_review_current_version",
+                )
+            else:
+                st.download_button(
+                    "Download Current Review Version",
+                    data=current_text,
+                    file_name=f"review_{current_label.replace(' ', '_')}.md",
+                    mime="text/markdown",
+                    width="stretch",
+                    key=f"download_current_review_version_{selected_idx}",
+                )
 
             st.divider()
             st.subheader("Claim-level Citation Verification")
@@ -229,29 +328,37 @@ with tab_review:
                 try:
                     with st.spinner("Verifying claims..."):
                         results = pipeline.verify_literature_review(
-                            st.session_state["literature_review"],
+                            current_text,
                             top_k=verify_top_k,
                         )
+                    review_versions[selected_idx]["verification"] = results
+                    st.session_state["review_versions"] = review_versions
+                    st.session_state["active_review_version"] = selected_idx
                     st.session_state["claim_verification"] = results
                     st.session_state["revised_literature_review"] = ""
                     claim_verification = results
                     revised_literature_review = ""
+                    current_verification = results
                     st.success("Claim verification completed.")
                 except Exception as exc:
                     st.error(f"Claim verification failed: {exc}")
 
-            if claim_verification:
+            if not current_verification:
+                st.info("This version has not been verified yet.")
+            else:
                 supported_count = sum(
-                    1 for item in claim_verification if item.get("status") == "supported"
+                    1
+                    for item in current_verification
+                    if item.get("status") == "supported"
                 )
                 weakly_supported_count = sum(
                     1
-                    for item in claim_verification
+                    for item in current_verification
                     if item.get("status") == "weakly_supported"
                 )
                 unsupported_count = sum(
                     1
-                    for item in claim_verification
+                    for item in current_verification
                     if item.get("status") == "unsupported"
                 )
                 st.markdown(
@@ -260,7 +367,7 @@ with tab_review:
                     f"- unsupported: {unsupported_count}"
                 )
 
-                for item in claim_verification:
+                for item in current_verification:
                     claim_text = str(item.get("claim", ""))
                     status = str(item.get("status", ""))
                     title = f"[{status}] {claim_text[:80]}"
@@ -293,31 +400,90 @@ with tab_review:
                                 if idx < len(evidence_list):
                                     st.divider()
 
-            if st.session_state["literature_review"] and st.session_state["claim_verification"]:
-                st.divider()
-                st.subheader("Revised Literature Review")
-                if st.button("Generate Revised Review", width="stretch"):
+            st.divider()
+            st.subheader("Revised Literature Review")
+            if st.button("Generate Revised Review", width="stretch"):
+                current_verification = review_versions[selected_idx].get("verification")
+                if not current_verification:
+                    st.warning("Please verify this version before generating a revised review.")
+                else:
                     try:
                         with st.spinner("Generating revised literature review..."):
                             revised = pipeline.rewrite_literature_review(
-                                st.session_state["literature_review"],
-                                st.session_state["claim_verification"],
+                                current_text,
+                                current_verification,
                             )
+                        next_idx = len(review_versions)
+                        review_versions.append(
+                            {
+                                "label": f"v{next_idx} Revised",
+                                "text": revised,
+                                "verification": None,
+                                "source": "revised",
+                                "parent": selected_idx,
+                            }
+                        )
+                        st.session_state["review_versions"] = review_versions
+                        st.session_state["active_review_version"] = next_idx
+                        st.session_state["pending_active_review_version"] = next_idx
                         st.session_state["revised_literature_review"] = revised
                         revised_literature_review = revised
                         st.success("Revised literature review generated.")
+                        st.rerun()
                     except Exception as exc:
                         st.error(f"Revised review generation failed: {exc}")
 
-                if revised_literature_review:
-                    st.markdown(revised_literature_review)
-                    st.download_button(
-                        "Download Revised Literature Review",
-                        data=revised_literature_review,
-                        file_name="revised_literature_review.md",
-                        mime="text/markdown",
-                        width="stretch",
-                    )
+            if revised_literature_review:
+                st.markdown(revised_literature_review)
+                st.download_button(
+                    "Download Revised Literature Review",
+                    data=revised_literature_review,
+                    file_name="revised_literature_review.md",
+                    mime="text/markdown",
+                    width="stretch",
+                    key="download_revised_review_latest_section",
+                )
+
+            st.divider()
+            st.subheader("Compare Review Versions")
+            if len(review_versions) >= 2:
+                compare_options = list(range(len(review_versions)))
+                left_idx = st.selectbox(
+                    "Left version",
+                    options=compare_options,
+                    index=0,
+                    format_func=lambda i: review_versions[i]["label"],
+                    key="compare_left_review_idx",
+                )
+                right_idx = st.selectbox(
+                    "Right version",
+                    options=compare_options,
+                    index=len(review_versions) - 1,
+                    format_func=lambda i: review_versions[i]["label"],
+                    key="compare_right_review_idx",
+                )
+
+                left_version = review_versions[left_idx]
+                right_version = review_versions[right_idx]
+
+                left_col, right_col = st.columns(2)
+                with left_col:
+                    st.markdown(f"### {left_version['label']}")
+                    st.markdown(str(left_version.get("text", "")))
+                with right_col:
+                    st.markdown(f"### {right_version['label']}")
+                    st.markdown(str(right_version.get("text", "")))
+
+                diff_text = make_unified_diff(
+                    str(left_version.get("text", "")),
+                    str(right_version.get("text", "")),
+                    old_label=str(left_version.get("label", "old")),
+                    new_label=str(right_version.get("label", "new")),
+                )
+                with st.expander("Text diff"):
+                    st.code(diff_text, language="diff")
+            else:
+                st.info("Need at least two versions to compare.")
 
 with tab_library:
     papers = pipeline.list_papers()

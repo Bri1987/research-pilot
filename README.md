@@ -194,6 +194,9 @@ streamlit run app/streamlit_app.py --server.fileWatcherType none
 - 系统支持 Verified Literature Review Rewrite。
 - 该功能基于 claim verification 和 conservative rewrite suggestions 生成修订版综述。
 - 原始综述不会被覆盖，用户可以同时比较 original 和 revised versions。
+- 系统支持 review version history（v0/v1/v2...）。
+- 用户可以对任意版本进行 claim verification，并基于当前版本继续生成下一版 revised review。
+- 系统支持 original vs revised side-by-side comparison 和 text diff。
 - 综述支持下载 markdown（`literature_review.md`）。
 - 修订版综述支持下载 markdown（`revised_literature_review.md`）。
 - 当前版本为 in-memory pipeline，重启 app 后需要重新 ingest。
@@ -209,6 +212,9 @@ streamlit run app/streamlit_app.py --server.fileWatcherType none
 - card 以 JSON 和 markdown 形式显示。
 - 用户能在 Literature Review tab 基于 paper cards 生成结构化中文综述。
 - 用户能下载 `literature_review.md`。
+- 用户可以对 v0、v1、v2 等版本做多轮 verify-rewrite 循环。
+- 用户可以 side-by-side 对比两个版本并查看 text diff。
+- v0 original 始终保留，不会被覆盖。
 - 返回回答包含 [E1]/[E2]。
 - evidence chunks 能展开查看。
 
