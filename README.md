@@ -81,6 +81,18 @@ python scripts/smoke_parse_pdf.py data/uploads/example.pdf
 - 不调用 LLM。
 - 给一篇 PDF 后，能打印 page 数、chunk 数和 first chunk preview。
 
+## Smoke test: BM25 retrieval
+运行命令：
+
+```bash
+python scripts/smoke_bm25.py data/uploads/example.pdf "program alignment"
+```
+
+成功标准：
+- 能打印 top-k chunks。
+- 不需要 `.env`。
+- 不调用 LLM。
+
 ## third_party 参考作用
 `third_party/` 下各项目仅作为参考，不参与本仓库业务代码修改：
 
