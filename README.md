@@ -148,6 +148,18 @@ python scripts/smoke_llm.py "hello"
 - The client uses OpenAI-compatible chat completions.
 - Do not use /v1/completions with messages.
 
+## Smoke test: RAG QA
+运行命令：
+
+```bash
+python scripts/smoke_rag_qa.py data/uploads/example.pdf "这篇论文主要解决什么问题？"
+```
+
+成功标准：
+- 能返回中文回答。
+- 回答中包含 [E1] / [E2] 形式的 evidence citation。
+- 末尾或下方能看到 evidence chunks 的 paper_id、page、preview。
+
 ## third_party 参考作用
 `third_party/` 下各项目仅作为参考，不参与本仓库业务代码修改：
 
