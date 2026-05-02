@@ -6,7 +6,9 @@ from researchpilot.ingest.pdf_parser_pymupdf import parse_pdf
 from researchpilot.qa.answer_with_citations import generate_answer_with_citations
 from researchpilot.retrieval.hybrid_retriever import HybridRetriever
 from researchpilot.review.lit_review_generator import generate_literature_review
+from researchpilot.review.revised_review_generator import generate_revised_literature_review
 from researchpilot.schemas import DocumentChunk
+from researchpilot.verify.claim_verifier import verify_review_claims
 
 
 class ResearchPilotPipeline:
@@ -62,4 +64,25 @@ class ResearchPilotPipeline:
         return generate_literature_review(
             topic=topic,
             paper_cards=paper_cards,
+        )
+
+    def verify_literature_review(
+        self,
+        review_text: str,
+        top_k: int = 4,
+    ) -> list[dict]:
+        return verify_review_claims(
+            review_text=review_text,
+            retriever=self.retriever,
+            top_k=top_k,
+        )
+
+    def rewrite_literature_review(
+        self,
+        original_review: str,
+        claim_verification: list[dict],
+    ) -> str:
+        return generate_revised_literature_review(
+            original_review=original_review,
+            claim_verification=claim_verification,
         )

@@ -191,10 +191,15 @@ streamlit run app/streamlit_app.py --server.fileWatcherType none
 - 当前最多验证前 12 条 claims，以控制运行时间。
 - weakly_supported / unsupported claims 会显示 conservative rewrite suggestion。
 - 系统不会自动改写原文，只提供人工参考。
+- 系统支持 Verified Literature Review Rewrite。
+- 该功能基于 claim verification 和 conservative rewrite suggestions 生成修订版综述。
+- 原始综述不会被覆盖，用户可以同时比较 original 和 revised versions。
 - 综述支持下载 markdown（`literature_review.md`）。
+- 修订版综述支持下载 markdown（`revised_literature_review.md`）。
 - 当前版本为 in-memory pipeline，重启 app 后需要重新 ingest。
 - Paper cards 当前保存在 session_state 中，重启 app 后需要重新生成。
 - 当前综述保存在 session_state 中，重启 app 后需要重新生成。
+- 当前修订版综述保存在 session_state 中，重启 app 后需要重新生成。
 
 成功标准：
 - `streamlit run app/streamlit_app.py` 能打开页面。

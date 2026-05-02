@@ -29,11 +29,14 @@ if "literature_review" not in st.session_state:
     st.session_state["literature_review"] = ""
 if "claim_verification" not in st.session_state:
     st.session_state["claim_verification"] = []
+if "revised_literature_review" not in st.session_state:
+    st.session_state["revised_literature_review"] = ""
 
 pipeline: ResearchPilotPipeline = st.session_state["pipeline"]
 paper_cards: dict[str, dict] = st.session_state["paper_cards"]
 literature_review: str = st.session_state["literature_review"]
 claim_verification: list[dict] = st.session_state["claim_verification"]
+revised_literature_review: str = st.session_state["revised_literature_review"]
 
 tab_upload, tab_ask, tab_cards, tab_review, tab_library = st.tabs(
     [
@@ -195,8 +198,10 @@ with tab_review:
                         )
                     st.session_state["literature_review"] = generated_review
                     st.session_state["claim_verification"] = []
+                    st.session_state["revised_literature_review"] = ""
                     literature_review = generated_review
                     claim_verification = []
+                    revised_literature_review = ""
                     st.success("Literature review generated.")
                 except Exception as exc:
                     st.error(f"Literature review generation failed: {exc}")
@@ -228,7 +233,9 @@ with tab_review:
                             top_k=verify_top_k,
                         )
                     st.session_state["claim_verification"] = results
+                    st.session_state["revised_literature_review"] = ""
                     claim_verification = results
+                    revised_literature_review = ""
                     st.success("Claim verification completed.")
                 except Exception as exc:
                     st.error(f"Claim verification failed: {exc}")
@@ -285,6 +292,32 @@ with tab_review:
                                 st.write(text)
                                 if idx < len(evidence_list):
                                     st.divider()
+
+            if st.session_state["literature_review"] and st.session_state["claim_verification"]:
+                st.divider()
+                st.subheader("Revised Literature Review")
+                if st.button("Generate Revised Review", width="stretch"):
+                    try:
+                        with st.spinner("Generating revised literature review..."):
+                            revised = pipeline.rewrite_literature_review(
+                                st.session_state["literature_review"],
+                                st.session_state["claim_verification"],
+                            )
+                        st.session_state["revised_literature_review"] = revised
+                        revised_literature_review = revised
+                        st.success("Revised literature review generated.")
+                    except Exception as exc:
+                        st.error(f"Revised review generation failed: {exc}")
+
+                if revised_literature_review:
+                    st.markdown(revised_literature_review)
+                    st.download_button(
+                        "Download Revised Literature Review",
+                        data=revised_literature_review,
+                        file_name="revised_literature_review.md",
+                        mime="text/markdown",
+                        width="stretch",
+                    )
 
 with tab_library:
     papers = pipeline.list_papers()
