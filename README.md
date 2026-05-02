@@ -182,12 +182,16 @@ streamlit run app/streamlit_app.py --server.fileWatcherType none
 说明：
 - 需要先配置 `.env` 才能问答。
 - 上传的 PDF 保存在 `data/uploads/`。
+- Paper Cards tab 可为已入库论文生成结构化论文卡片。
 - 当前版本为 in-memory pipeline，重启 app 后需要重新 ingest。
+- Paper cards 当前保存在 session_state 中，重启 app 后需要重新生成。
 
 成功标准：
 - `streamlit run app/streamlit_app.py` 能打开页面。
 - 用户能上传 PDF。
 - 用户能提问。
+- 用户能在 Paper Cards tab 选择论文并生成 card。
+- card 以 JSON 和 markdown 形式显示。
 - 返回回答包含 [E1]/[E2]。
 - evidence chunks 能展开查看。
 
