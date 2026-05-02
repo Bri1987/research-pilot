@@ -123,6 +123,31 @@ python scripts/smoke_hybrid.py data/uploads/example.pdf "program alignment"
 - 不需要 `.env`。
 - 不调用 LLM。
 
+## Smoke test: LLM client
+先创建 `.env`：
+
+```bash
+cp .env.example .env
+```
+
+然后设置：
+
+```env
+OPENAI_API_KEY=
+OPENAI_BASE_URL=
+OPENAI_MODEL=
+```
+
+运行：
+
+```bash
+python scripts/smoke_llm.py "hello"
+```
+
+提醒：
+- The client uses OpenAI-compatible chat completions.
+- Do not use /v1/completions with messages.
+
 ## third_party 参考作用
 `third_party/` 下各项目仅作为参考，不参与本仓库业务代码修改：
 
