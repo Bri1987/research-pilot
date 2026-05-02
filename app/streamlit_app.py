@@ -25,12 +25,21 @@ if "pipeline" not in st.session_state:
     st.session_state["pipeline"] = ResearchPilotPipeline()
 if "paper_cards" not in st.session_state:
     st.session_state["paper_cards"] = {}
+if "literature_review" not in st.session_state:
+    st.session_state["literature_review"] = ""
 
 pipeline: ResearchPilotPipeline = st.session_state["pipeline"]
 paper_cards: dict[str, dict] = st.session_state["paper_cards"]
+literature_review: str = st.session_state["literature_review"]
 
-tab_upload, tab_ask, tab_cards, tab_library = st.tabs(
-    ["Upload PDFs", "Ask Papers", "Paper Cards", "Current Library"]
+tab_upload, tab_ask, tab_cards, tab_review, tab_library = st.tabs(
+    [
+        "Upload PDFs",
+        "Ask Papers",
+        "Paper Cards",
+        "Literature Review",
+        "Current Library",
+    ]
 )
 
 with tab_upload:
@@ -165,6 +174,38 @@ with tab_cards:
         )
     else:
         st.info("Generate at least one paper card to build a comparison table.")
+
+with tab_review:
+    if len(paper_cards) < 1:
+        st.info("Generate paper cards first.")
+    else:
+        topic = st.text_input("Research topic", key="literature_review_topic")
+        if st.button("Generate Literature Review", width="stretch"):
+            if not topic.strip():
+                st.warning("Please enter a research topic.")
+            else:
+                try:
+                    with st.spinner("Generating literature review..."):
+                        generated_review = pipeline.write_literature_review(
+                            topic=topic.strip(),
+                            paper_cards=paper_cards,
+                        )
+                    st.session_state["literature_review"] = generated_review
+                    literature_review = generated_review
+                    st.success("Literature review generated.")
+                except Exception as exc:
+                    st.error(f"Literature review generation failed: {exc}")
+
+        if literature_review:
+            st.subheader("Literature Review")
+            st.markdown(literature_review)
+            st.download_button(
+                "Download Markdown",
+                data=literature_review,
+                file_name="literature_review.md",
+                mime="text/markdown",
+                width="stretch",
+            )
 
 with tab_library:
     papers = pipeline.list_papers()

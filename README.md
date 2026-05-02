@@ -185,8 +185,11 @@ streamlit run app/streamlit_app.py --server.fileWatcherType none
 - Paper Cards tab 可为已入库论文生成结构化论文卡片。
 - Paper Cards tab 可以自动汇总已生成的 paper cards，形成 comparison table。
 - 支持下载 comparison table CSV（`paper_comparison.csv`）。
+- Literature Review tab 可以基于已生成的 paper cards 生成结构化综述。
+- 综述支持下载 markdown（`literature_review.md`）。
 - 当前版本为 in-memory pipeline，重启 app 后需要重新 ingest。
 - Paper cards 当前保存在 session_state 中，重启 app 后需要重新生成。
+- 当前综述保存在 session_state 中，重启 app 后需要重新生成。
 
 成功标准：
 - `streamlit run app/streamlit_app.py` 能打开页面。
@@ -194,6 +197,8 @@ streamlit run app/streamlit_app.py --server.fileWatcherType none
 - 用户能提问。
 - 用户能在 Paper Cards tab 选择论文并生成 card。
 - card 以 JSON 和 markdown 形式显示。
+- 用户能在 Literature Review tab 基于 paper cards 生成结构化中文综述。
+- 用户能下载 `literature_review.md`。
 - 返回回答包含 [E1]/[E2]。
 - evidence chunks 能展开查看。
 

@@ -5,6 +5,7 @@ from researchpilot.ingest.chunker import chunk_pages
 from researchpilot.ingest.pdf_parser_pymupdf import parse_pdf
 from researchpilot.qa.answer_with_citations import generate_answer_with_citations
 from researchpilot.retrieval.hybrid_retriever import HybridRetriever
+from researchpilot.review.lit_review_generator import generate_literature_review
 from researchpilot.schemas import DocumentChunk
 
 
@@ -51,4 +52,14 @@ class ResearchPilotPipeline:
         return generate_paper_card(
             paper_id=paper_id,
             chunks=chunks,
+        )
+
+    def write_literature_review(
+        self,
+        topic: str,
+        paper_cards: dict[str, dict],
+    ) -> str:
+        return generate_literature_review(
+            topic=topic,
+            paper_cards=paper_cards,
         )
