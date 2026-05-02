@@ -8,6 +8,7 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
+from researchpilot.cards.comparison_table import build_comparison_table
 from researchpilot.ingest.pipeline import ResearchPilotPipeline
 
 
@@ -40,7 +41,7 @@ with tab_upload:
         accept_multiple_files=True,
     )
 
-    if st.button("Ingest PDFs", use_container_width=True):
+    if st.button("Ingest PDFs", width="stretch"):
         if not uploaded_files:
             st.warning("Please upload at least one PDF file first.")
         else:
@@ -67,7 +68,7 @@ with tab_ask:
     question = st.text_input("Question")
     top_k = st.slider("Top-k evidence chunks", min_value=3, max_value=12, value=8)
 
-    if st.button("Ask", use_container_width=True):
+    if st.button("Ask", width="stretch"):
         if not papers:
             st.warning("Please ingest at least one PDF before asking questions.")
         elif not question.strip():
@@ -111,7 +112,7 @@ with tab_cards:
             options=papers,
             key="paper_card_selected_paper",
         )
-        if st.button("Generate Paper Card", use_container_width=True):
+        if st.button("Generate Paper Card", width="stretch"):
             try:
                 card = pipeline.build_paper_card(selected_paper_id)
                 paper_cards[selected_paper_id] = card
@@ -148,6 +149,22 @@ with tab_cards:
                 st.markdown(f"**relevance**: {current_card.get('relevance', '')}")
             else:
                 st.write(current_card)
+
+    st.divider()
+    st.subheader("Comparison Table")
+    if len(paper_cards) >= 1:
+        comparison_df = build_comparison_table(paper_cards)
+        st.dataframe(comparison_df, width="stretch")
+        csv_data = comparison_df.to_csv(index=False)
+        st.download_button(
+            "Download CSV",
+            data=csv_data,
+            file_name="paper_comparison.csv",
+            mime="text/csv",
+            width="stretch",
+        )
+    else:
+        st.info("Generate at least one paper card to build a comparison table.")
 
 with tab_library:
     papers = pipeline.list_papers()

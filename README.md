@@ -183,6 +183,8 @@ streamlit run app/streamlit_app.py --server.fileWatcherType none
 - 需要先配置 `.env` 才能问答。
 - 上传的 PDF 保存在 `data/uploads/`。
 - Paper Cards tab 可为已入库论文生成结构化论文卡片。
+- Paper Cards tab 可以自动汇总已生成的 paper cards，形成 comparison table。
+- 支持下载 comparison table CSV（`paper_comparison.csv`）。
 - 当前版本为 in-memory pipeline，重启 app 后需要重新 ingest。
 - Paper cards 当前保存在 session_state 中，重启 app 后需要重新生成。
 
