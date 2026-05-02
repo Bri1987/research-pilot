@@ -186,6 +186,11 @@ streamlit run app/streamlit_app.py --server.fileWatcherType none
 - Paper Cards tab 可以自动汇总已生成的 paper cards，形成 comparison table。
 - 支持下载 comparison table CSV（`paper_comparison.csv`）。
 - Literature Review tab 可以基于已生成的 paper cards 生成结构化综述。
+- Literature Review tab 支持 claim-level citation verification。
+- 系统会把综述拆成 claims，并检索 evidence 判断 supported / weakly_supported / unsupported。
+- 当前最多验证前 12 条 claims，以控制运行时间。
+- weakly_supported / unsupported claims 会显示 conservative rewrite suggestion。
+- 系统不会自动改写原文，只提供人工参考。
 - 综述支持下载 markdown（`literature_review.md`）。
 - 当前版本为 in-memory pipeline，重启 app 后需要重新 ingest。
 - Paper cards 当前保存在 session_state 中，重启 app 后需要重新生成。

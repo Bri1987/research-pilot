@@ -27,10 +27,13 @@ if "paper_cards" not in st.session_state:
     st.session_state["paper_cards"] = {}
 if "literature_review" not in st.session_state:
     st.session_state["literature_review"] = ""
+if "claim_verification" not in st.session_state:
+    st.session_state["claim_verification"] = []
 
 pipeline: ResearchPilotPipeline = st.session_state["pipeline"]
 paper_cards: dict[str, dict] = st.session_state["paper_cards"]
 literature_review: str = st.session_state["literature_review"]
+claim_verification: list[dict] = st.session_state["claim_verification"]
 
 tab_upload, tab_ask, tab_cards, tab_review, tab_library = st.tabs(
     [
@@ -191,7 +194,9 @@ with tab_review:
                             paper_cards=paper_cards,
                         )
                     st.session_state["literature_review"] = generated_review
+                    st.session_state["claim_verification"] = []
                     literature_review = generated_review
+                    claim_verification = []
                     st.success("Literature review generated.")
                 except Exception as exc:
                     st.error(f"Literature review generation failed: {exc}")
@@ -206,6 +211,80 @@ with tab_review:
                 mime="text/markdown",
                 width="stretch",
             )
+
+            st.divider()
+            st.subheader("Claim-level Citation Verification")
+            verify_top_k = st.slider(
+                "Evidence chunks per claim",
+                min_value=2,
+                max_value=6,
+                value=4,
+            )
+            if st.button("Verify Claims", width="stretch"):
+                try:
+                    with st.spinner("Verifying claims..."):
+                        results = pipeline.verify_literature_review(
+                            st.session_state["literature_review"],
+                            top_k=verify_top_k,
+                        )
+                    st.session_state["claim_verification"] = results
+                    claim_verification = results
+                    st.success("Claim verification completed.")
+                except Exception as exc:
+                    st.error(f"Claim verification failed: {exc}")
+
+            if claim_verification:
+                supported_count = sum(
+                    1 for item in claim_verification if item.get("status") == "supported"
+                )
+                weakly_supported_count = sum(
+                    1
+                    for item in claim_verification
+                    if item.get("status") == "weakly_supported"
+                )
+                unsupported_count = sum(
+                    1
+                    for item in claim_verification
+                    if item.get("status") == "unsupported"
+                )
+                st.markdown(
+                    f"- supported: {supported_count}\n"
+                    f"- weakly_supported: {weakly_supported_count}\n"
+                    f"- unsupported: {unsupported_count}"
+                )
+
+                for item in claim_verification:
+                    claim_text = str(item.get("claim", ""))
+                    status = str(item.get("status", ""))
+                    title = f"[{status}] {claim_text[:80]}"
+                    with st.expander(title):
+                        st.markdown(f"**status**: {status}")
+                        st.markdown(f"**reason**: {item.get('reason', '')}")
+                        st.markdown(
+                            f"**best_evidence**: {item.get('best_evidence', [])}"
+                        )
+                        suggested_rewrite = str(
+                            item.get("suggested_rewrite", "")
+                        ).strip()
+                        if suggested_rewrite:
+                            st.markdown("**Suggested conservative rewrite**")
+                            st.info(suggested_rewrite)
+                        evidence_list = item.get("evidence", []) or []
+                        if not evidence_list:
+                            st.info("No evidence.")
+                        else:
+                            for idx, ev in enumerate(evidence_list, start=1):
+                                paper_id = ev.get("paper_id", "")
+                                page = ev.get("page", "")
+                                score = float(ev.get("score", 0.0))
+                                text = ev.get("text", "")
+                                st.markdown(
+                                    f"**E{idx}** paper_id={paper_id}, "
+                                    f"page={page}, score={score:.4f}"
+                                )
+                                st.write(text)
+                                if idx < len(evidence_list):
+                                    st.divider()
 
 with tab_library:
     papers = pipeline.list_papers()
