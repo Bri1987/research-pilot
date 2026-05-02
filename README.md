@@ -209,6 +209,10 @@ streamlit run app/streamlit_app.py --server.fileWatcherType none
 - 需要先配置 `.env` 才能问答。
 - 上传的 PDF 保存在 `data/uploads/`。
 - Search Papers tab 支持 arXiv topic search。
+- Watchlist tab 支持添加 professor / research group / institution / keywords 关注对象。
+- Search Papers tab 会基于 watchlist 对 arXiv 结果打分，并解释推荐原因。
+- Watchlist Trend Summary 可总结关注对象相关论文趋势。
+- 当前版本仅基于 arXiv metadata 和本地 watchlist；future work 可接 Semantic Scholar / OpenAlex author and institution graph。
 - 用户可以勾选搜索结果中的论文并下载 PDF。
 - 可选择自动 ingest 下载后的 PDFs 到当前知识库。
 - Paper Cards tab 可为已入库论文生成结构化论文卡片。
@@ -222,6 +226,8 @@ streamlit run app/streamlit_app.py --server.fileWatcherType none
 - 系统不会自动改写原文，只提供人工参考。
 - 系统支持 Verified Literature Review Rewrite。
 - 该功能基于 claim verification 和 conservative rewrite suggestions 生成修订版综述。
+- Research Ideas tab 可以基于 paper cards、综述、claim verification 和 revised review 生成未来研究方向。
+- 该功能不会声称 ideas 一定原创，只生成候选研究假设，仍需人工判断和进一步调研。
 - 原始综述不会被覆盖，用户可以同时比较 original 和 revised versions。
 - 系统支持 review version history（v0/v1/v2...）。
 - 用户可以对任意版本进行 claim verification，并基于当前版本继续生成下一版 revised review。

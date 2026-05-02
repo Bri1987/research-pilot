@@ -13,6 +13,11 @@ from researchpilot.ingest.pipeline import ResearchPilotPipeline
 from researchpilot.review.review_diff import make_unified_diff
 from researchpilot.search.arxiv_search import download_arxiv_paper
 from researchpilot.search.arxiv_search import search_arxiv_papers
+from researchpilot.watchlist.watchlist_ranker import rank_papers_by_watchlist
+from researchpilot.watchlist.watchlist_store import add_watch_item
+from researchpilot.watchlist.watchlist_store import delete_watch_item
+from researchpilot.watchlist.watchlist_store import load_watchlist
+from researchpilot.watchlist.watchlist_summary import summarize_watchlist_trends
 
 
 UPLOAD_DIR = PROJECT_ROOT / "data" / "uploads"
@@ -44,6 +49,17 @@ if "arxiv_results" not in st.session_state:
     st.session_state["arxiv_results"] = []
 if "arxiv_topic" not in st.session_state:
     st.session_state["arxiv_topic"] = ""
+if "review_topic" not in st.session_state:
+    st.session_state["review_topic"] = ""
+if "research_ideas" not in st.session_state:
+    st.session_state["research_ideas"] = ""
+if "watchlist" not in st.session_state:
+    try:
+        st.session_state["watchlist"] = load_watchlist()
+    except Exception:
+        st.session_state["watchlist"] = []
+if "watchlist_trend_summary" not in st.session_state:
+    st.session_state["watchlist_trend_summary"] = ""
 
 pipeline: ResearchPilotPipeline = st.session_state["pipeline"]
 paper_cards: dict[str, dict] = st.session_state["paper_cards"]
@@ -54,6 +70,9 @@ review_versions: list[dict] = st.session_state["review_versions"]
 active_review_version: int = st.session_state["active_review_version"]
 arxiv_results: list[dict] = st.session_state["arxiv_results"]
 arxiv_topic: str = st.session_state["arxiv_topic"]
+research_ideas: str = st.session_state["research_ideas"]
+watchlist: list[dict] = st.session_state["watchlist"]
+watchlist_trend_summary: str = st.session_state["watchlist_trend_summary"]
 
 def _arxiv_selection_key(paper: dict, rank: int) -> str:
     base_id = str(paper.get("arxiv_id") or paper.get("entry_id") or f"rank_{rank}")
@@ -62,13 +81,19 @@ def _arxiv_selection_key(paper: dict, rank: int) -> str:
     return f"arxiv_select_{normalized[:100]}_{rank}"
 
 
-tab_search, tab_upload, tab_ask, tab_cards, tab_review, tab_library = st.tabs(
+def _split_lines(text: str) -> list[str]:
+    return [line.strip() for line in str(text).splitlines() if line.strip()]
+
+
+tab_search, tab_watchlist, tab_upload, tab_ask, tab_cards, tab_review, tab_ideas, tab_library = st.tabs(
     [
         "Search Papers",
+        "Watchlist",
         "Upload PDFs",
         "Ask Papers",
         "Paper Cards",
         "Literature Review",
+        "Research Ideas",
         "Current Library",
     ]
 )
@@ -92,6 +117,11 @@ with tab_search:
         index=0,
         key="arxiv_sort_by",
     )
+    prioritize_watchlist_matches = st.checkbox(
+        "Prioritize watchlist matches",
+        value=True,
+        key="arxiv_prioritize_watchlist_matches",
+    )
 
     if st.button("Search arXiv", width="stretch", key="search_arxiv_button"):
         topic = search_topic_input.strip()
@@ -105,11 +135,24 @@ with tab_search:
                         max_results=arxiv_max_results,
                         sort_by=arxiv_sort_by,
                     )
-                st.session_state["arxiv_results"] = results
+                try:
+                    current_watchlist = load_watchlist()
+                    st.session_state["watchlist"] = current_watchlist
+                except Exception as exc:
+                    current_watchlist = st.session_state.get("watchlist", [])
+                    st.warning(f"Failed to reload watchlist from disk: {exc}")
+
+                ranked_results = rank_papers_by_watchlist(
+                    results,
+                    current_watchlist,
+                    prioritize=prioritize_watchlist_matches,
+                )
+
+                st.session_state["arxiv_results"] = ranked_results
                 st.session_state["arxiv_topic"] = topic
-                arxiv_results = results
-                if results:
-                    st.success(f"Found {len(results)} arXiv papers.")
+                arxiv_results = ranked_results
+                if ranked_results:
+                    st.success(f"Found {len(ranked_results)} arXiv papers.")
                 else:
                     st.info("No arXiv papers found for this topic.")
             except Exception as exc:
@@ -121,7 +164,11 @@ with tab_search:
 
         for rank, paper in enumerate(arxiv_results, start=1):
             paper_title = str(paper.get("title", ""))
-            expander_title = f"{rank}. {paper_title}"
+            watch_score = float(paper.get("watchlist_score", 0.0))
+            if watch_score > 0:
+                expander_title = f"{rank}. ⭐ score={watch_score:.1f} | {paper_title}"
+            else:
+                expander_title = f"{rank}. {paper_title}"
             with st.expander(expander_title):
                 st.markdown(f"**rank**: {rank}")
                 st.markdown(f"**title**: {paper_title}")
@@ -132,6 +179,16 @@ with tab_search:
                 )
                 st.markdown(f"**summary**: {paper.get('summary', '')}")
                 st.markdown(f"**pdf_url**: {paper.get('pdf_url', '')}")
+                matched_items = paper.get("matched_watch_items", []) or []
+                reasons = paper.get("watchlist_reasons", []) or []
+                st.markdown(f"**Watchlist score**: {watch_score:.2f}")
+                if watch_score > 0:
+                    st.markdown(f"**Matched watch items**: {matched_items}")
+                    st.markdown("**Match reasons**:")
+                    for reason in reasons:
+                        st.markdown(f"- {reason}")
+                else:
+                    st.markdown("No watchlist match.")
                 st.checkbox(
                     "Select this paper",
                     key=_arxiv_selection_key(paper, rank),
@@ -176,6 +233,118 @@ with tab_search:
                             )
                     except Exception as exc:
                         st.error(f"{paper_title}: download/ingest failed. {exc}")
+
+with tab_watchlist:
+    st.subheader("Add Watch Item")
+    with st.form("watchlist_add_form", clear_on_submit=False):
+        watch_name = st.text_input("name")
+        watch_type = st.selectbox(
+            "type",
+            options=[
+                "research_group",
+                "professor",
+                "institution",
+                "keyword_topic",
+                "custom",
+            ],
+            index=0,
+        )
+        watch_authors = st.text_area(
+            "authors (one per line)",
+            placeholder="Monica Lam\nChristopher Potts",
+        )
+        watch_institutions = st.text_area(
+            "institutions (one per line)",
+            placeholder="Stanford University",
+        )
+        watch_keywords = st.text_area(
+            "keywords (one per line)",
+            placeholder="STORM\nRAG\nknowledge curation",
+        )
+        watch_notes = st.text_area("notes")
+        add_submitted = st.form_submit_button(
+            "Add to Watchlist",
+            width="stretch",
+        )
+
+    if add_submitted:
+        try:
+            updated_watchlist = add_watch_item(
+                {
+                    "name": watch_name,
+                    "type": watch_type,
+                    "authors": _split_lines(watch_authors),
+                    "institutions": _split_lines(watch_institutions),
+                    "keywords": _split_lines(watch_keywords),
+                    "notes": watch_notes,
+                }
+            )
+            st.session_state["watchlist"] = updated_watchlist
+            watchlist = updated_watchlist
+            st.success(f"Added watch item: {watch_name.strip()}")
+        except Exception as exc:
+            st.error(f"Failed to add watch item: {exc}")
+
+    st.divider()
+    st.subheader("Current Watchlist")
+    if not watchlist:
+        st.info("暂无关注对象。")
+    else:
+        for idx, item in enumerate(watchlist):
+            item_name = str(item.get("name", ""))
+            item_type = str(item.get("type", ""))
+            with st.expander(f"{idx + 1}. {item_name} ({item_type})"):
+                st.markdown(f"**name**: {item_name}")
+                st.markdown(f"**type**: {item_type}")
+                st.markdown(f"**authors**: {item.get('authors', [])}")
+                st.markdown(f"**institutions**: {item.get('institutions', [])}")
+                st.markdown(f"**keywords**: {item.get('keywords', [])}")
+                st.markdown(f"**notes**: {item.get('notes', '')}")
+                if st.button(
+                    "Delete",
+                    key=f"watchlist_delete_{idx}_{item_name}",
+                    width="content",
+                ):
+                    try:
+                        updated_watchlist = delete_watch_item(idx)
+                        st.session_state["watchlist"] = updated_watchlist
+                        st.success(f"Deleted watch item: {item_name}")
+                        st.rerun()
+                    except Exception as exc:
+                        st.error(f"Failed to delete watch item: {exc}")
+
+    st.divider()
+    st.subheader("Watchlist Trend Summary")
+    if not st.session_state.get("arxiv_results"):
+        st.info("请先去 Search Papers 搜索。")
+    else:
+        if st.button(
+            "Summarize Watchlist Trends",
+            width="stretch",
+            key="summarize_watchlist_trends_button",
+        ):
+            try:
+                summary = summarize_watchlist_trends(
+                    papers=st.session_state["arxiv_results"],
+                    watchlist=st.session_state.get("watchlist", []),
+                    topic=st.session_state.get("arxiv_topic"),
+                )
+                st.session_state["watchlist_trend_summary"] = summary
+                watchlist_trend_summary = summary
+                st.success("Watchlist trend summary generated.")
+            except Exception as exc:
+                st.error(f"Failed to summarize watchlist trends: {exc}")
+
+        if watchlist_trend_summary:
+            st.markdown(watchlist_trend_summary)
+            st.download_button(
+                "Download Watchlist Trend Summary",
+                data=watchlist_trend_summary,
+                file_name="watchlist_trend_summary.md",
+                mime="text/markdown",
+                width="stretch",
+                key="download_watchlist_trend_summary",
+            )
 
 with tab_upload:
     st.caption(f"Uploaded files are saved to: {UPLOAD_DIR}")
@@ -327,6 +496,7 @@ with tab_review:
                             paper_cards=paper_cards,
                         )
                     st.session_state["literature_review"] = generated_review
+                    st.session_state["review_topic"] = topic.strip()
                     st.session_state["claim_verification"] = []
                     st.session_state["revised_literature_review"] = ""
                     st.session_state["review_versions"] = [
@@ -604,6 +774,78 @@ with tab_review:
                     st.code(diff_text, language="diff")
             else:
                 st.info("Need at least two versions to compare.")
+
+with tab_ideas:
+    if not paper_cards:
+        st.info("Generate paper cards first.")
+    else:
+        has_original_review = bool(st.session_state.get("literature_review", "").strip())
+        has_revised_review = bool(
+            st.session_state.get("revised_literature_review", "").strip()
+        )
+        has_claim_verification = bool(st.session_state.get("claim_verification"))
+
+        st.markdown(
+            f"- paper cards: {len(paper_cards)}\n"
+            f"- original review exists: {has_original_review}\n"
+            f"- revised review exists: {has_revised_review}\n"
+            f"- claim verification exists: {has_claim_verification}"
+        )
+
+        fallback_topic = (
+            str(st.session_state.get("review_topic", "")).strip()
+            or str(st.session_state.get("arxiv_topic", "")).strip()
+        )
+        if "research_ideas_topic" not in st.session_state:
+            st.session_state["research_ideas_topic"] = fallback_topic
+        elif not str(st.session_state["research_ideas_topic"]).strip() and fallback_topic:
+            st.session_state["research_ideas_topic"] = fallback_topic
+
+        topic_input = st.text_input(
+            "Research topic",
+            key="research_ideas_topic",
+        )
+        num_ideas = st.slider(
+            "Number of ideas",
+            min_value=3,
+            max_value=8,
+            value=5,
+            key="research_ideas_count",
+        )
+
+        if st.button(
+            "Generate Research Ideas",
+            width="stretch",
+            key="generate_research_ideas_button",
+        ):
+            try:
+                with st.spinner("Generating research ideas..."):
+                    ideas = pipeline.generate_research_ideas(
+                        topic=topic_input.strip() or None,
+                        paper_cards=st.session_state["paper_cards"],
+                        literature_review=st.session_state.get("literature_review"),
+                        revised_literature_review=st.session_state.get(
+                            "revised_literature_review"
+                        ),
+                        claim_verification=st.session_state.get("claim_verification"),
+                        num_ideas=num_ideas,
+                    )
+                st.session_state["research_ideas"] = ideas
+                research_ideas = ideas
+                st.success("Research ideas generated.")
+            except Exception as exc:
+                st.error(f"Research idea generation failed: {exc}")
+
+        if research_ideas:
+            st.markdown(research_ideas)
+            st.download_button(
+                "Download Research Ideas",
+                data=research_ideas,
+                file_name="research_ideas.md",
+                mime="text/markdown",
+                width="stretch",
+                key="download_research_ideas_markdown",
+            )
 
 with tab_library:
     papers = pipeline.list_papers()
