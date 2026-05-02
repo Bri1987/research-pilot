@@ -1,0 +1,10 @@
+streamlit
+arxiv
+pymupdf
+rank-bm25
+sentence-transformers
+numpy
+pandas
+openai
+python-dotenv
+pydantic
