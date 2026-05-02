@@ -1,5 +1,6 @@
 from pathlib import Path
 
+from researchpilot.cards.paper_card_generator import generate_paper_card
 from researchpilot.ingest.chunker import chunk_pages
 from researchpilot.ingest.pdf_parser_pymupdf import parse_pdf
 from researchpilot.qa.answer_with_citations import generate_answer_with_citations
@@ -44,3 +45,10 @@ class ResearchPilotPipeline:
 
     def list_papers(self) -> list[str]:
         return self.retriever.list_papers()
+
+    def build_paper_card(self, paper_id: str) -> dict:
+        chunks = self.retriever.get_chunks_by_paper(paper_id)
+        return generate_paper_card(
+            paper_id=paper_id,
+            chunks=chunks,
+        )
