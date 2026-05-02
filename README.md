@@ -172,6 +172,32 @@ python scripts/smoke_paper_card.py data/uploads/example.pdf
 - 包含 problem / method / contribution / limitation / future_work 等字段。
 - 需要配置 `.env`。
 
+## Smoke test: arXiv paper search
+运行命令：
+
+```bash
+python scripts/smoke_arxiv_search.py "program equivalence checking semantic alignment" --max-results 5
+```
+
+下载第一个搜索结果 PDF：
+
+```bash
+python scripts/smoke_arxiv_search.py "program equivalence checking semantic alignment" --max-results 5 --download-first
+```
+
+说明：
+- This step uses arXiv search only.
+- It does not call the LLM.
+- It does not automatically ingest the downloaded PDF yet.
+- arXiv API has rate limits.
+- If HTTP 429 occurs, wait a few minutes and retry.
+- The code uses a 3-second client delay and small page size.
+
+成功标准：
+- 能打印 arXiv 搜索结果。
+- 加 `--download-first` 后能下载 PDF 到 `data/uploads/`。
+- 不需要 `.env`。
+
 ## Run Streamlit app
 运行命令：
 
@@ -182,6 +208,9 @@ streamlit run app/streamlit_app.py --server.fileWatcherType none
 说明：
 - 需要先配置 `.env` 才能问答。
 - 上传的 PDF 保存在 `data/uploads/`。
+- Search Papers tab 支持 arXiv topic search。
+- 用户可以勾选搜索结果中的论文并下载 PDF。
+- 可选择自动 ingest 下载后的 PDFs 到当前知识库。
 - Paper Cards tab 可为已入库论文生成结构化论文卡片。
 - Paper Cards tab 可以自动汇总已生成的 paper cards，形成 comparison table。
 - 支持下载 comparison table CSV（`paper_comparison.csv`）。

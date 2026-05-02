@@ -11,6 +11,8 @@ if str(PROJECT_ROOT) not in sys.path:
 from researchpilot.cards.comparison_table import build_comparison_table
 from researchpilot.ingest.pipeline import ResearchPilotPipeline
 from researchpilot.review.review_diff import make_unified_diff
+from researchpilot.search.arxiv_search import download_arxiv_paper
+from researchpilot.search.arxiv_search import search_arxiv_papers
 
 
 UPLOAD_DIR = PROJECT_ROOT / "data" / "uploads"
@@ -38,6 +40,10 @@ if "active_review_version" not in st.session_state:
     st.session_state["active_review_version"] = 0
 if "pending_active_review_version" not in st.session_state:
     st.session_state["pending_active_review_version"] = None
+if "arxiv_results" not in st.session_state:
+    st.session_state["arxiv_results"] = []
+if "arxiv_topic" not in st.session_state:
+    st.session_state["arxiv_topic"] = ""
 
 pipeline: ResearchPilotPipeline = st.session_state["pipeline"]
 paper_cards: dict[str, dict] = st.session_state["paper_cards"]
@@ -46,9 +52,19 @@ claim_verification: list[dict] = st.session_state["claim_verification"]
 revised_literature_review: str = st.session_state["revised_literature_review"]
 review_versions: list[dict] = st.session_state["review_versions"]
 active_review_version: int = st.session_state["active_review_version"]
+arxiv_results: list[dict] = st.session_state["arxiv_results"]
+arxiv_topic: str = st.session_state["arxiv_topic"]
 
-tab_upload, tab_ask, tab_cards, tab_review, tab_library = st.tabs(
+def _arxiv_selection_key(paper: dict, rank: int) -> str:
+    base_id = str(paper.get("arxiv_id") or paper.get("entry_id") or f"rank_{rank}")
+    normalized = "".join(ch if ch.isalnum() else "_" for ch in base_id)
+    normalized = normalized.strip("_") or f"rank_{rank}"
+    return f"arxiv_select_{normalized[:100]}_{rank}"
+
+
+tab_search, tab_upload, tab_ask, tab_cards, tab_review, tab_library = st.tabs(
     [
+        "Search Papers",
         "Upload PDFs",
         "Ask Papers",
         "Paper Cards",
@@ -56,6 +72,110 @@ tab_upload, tab_ask, tab_cards, tab_review, tab_library = st.tabs(
         "Current Library",
     ]
 )
+
+with tab_search:
+    search_topic_input = st.text_input(
+        "Research topic",
+        value=arxiv_topic,
+        key="arxiv_topic_input",
+    )
+    arxiv_max_results = st.slider(
+        "Max results",
+        min_value=3,
+        max_value=20,
+        value=5,
+        key="arxiv_max_results",
+    )
+    arxiv_sort_by = st.selectbox(
+        "Sort by",
+        options=["relevance", "submitted_date"],
+        index=0,
+        key="arxiv_sort_by",
+    )
+
+    if st.button("Search arXiv", width="stretch", key="search_arxiv_button"):
+        topic = search_topic_input.strip()
+        if not topic:
+            st.warning("Please enter a research topic.")
+        else:
+            try:
+                with st.spinner("Searching arXiv..."):
+                    results = search_arxiv_papers(
+                        topic,
+                        max_results=arxiv_max_results,
+                        sort_by=arxiv_sort_by,
+                    )
+                st.session_state["arxiv_results"] = results
+                st.session_state["arxiv_topic"] = topic
+                arxiv_results = results
+                if results:
+                    st.success(f"Found {len(results)} arXiv papers.")
+                else:
+                    st.info("No arXiv papers found for this topic.")
+            except Exception as exc:
+                st.error(f"Search failed: {exc}")
+
+    if arxiv_results:
+        st.caption(f'Latest topic: "{st.session_state.get("arxiv_topic", "")}"')
+        st.subheader("Search Results")
+
+        for rank, paper in enumerate(arxiv_results, start=1):
+            paper_title = str(paper.get("title", ""))
+            expander_title = f"{rank}. {paper_title}"
+            with st.expander(expander_title):
+                st.markdown(f"**rank**: {rank}")
+                st.markdown(f"**title**: {paper_title}")
+                st.markdown(f"**authors**: {', '.join(paper.get('authors', []))}")
+                st.markdown(f"**published**: {paper.get('published', '')}")
+                st.markdown(
+                    f"**primary_category**: {paper.get('primary_category', '')}"
+                )
+                st.markdown(f"**summary**: {paper.get('summary', '')}")
+                st.markdown(f"**pdf_url**: {paper.get('pdf_url', '')}")
+                st.checkbox(
+                    "Select this paper",
+                    key=_arxiv_selection_key(paper, rank),
+                )
+
+        st.divider()
+        auto_ingest = st.checkbox(
+            "Auto ingest downloaded PDFs",
+            value=True,
+            key="arxiv_auto_ingest",
+        )
+        if st.button(
+            "Download Selected Papers",
+            width="stretch",
+            key="download_selected_arxiv_papers",
+        ):
+            selected_papers: list[dict] = []
+            for rank, paper in enumerate(arxiv_results, start=1):
+                if st.session_state.get(_arxiv_selection_key(paper, rank), False):
+                    selected_papers.append(paper)
+
+            if not selected_papers:
+                st.warning("Please select at least one paper first.")
+            else:
+                for paper in selected_papers:
+                    paper_title = str(paper.get("title", ""))
+                    try:
+                        downloaded_path = download_arxiv_paper(
+                            paper,
+                            output_dir="data/uploads",
+                        )
+                        st.success(
+                            f"Downloaded: {paper_title}\n\nSaved to: {downloaded_path}"
+                        )
+                        if auto_ingest:
+                            chunks = pipeline.ingest_pdf(downloaded_path)
+                            ingested_paper_id = Path(downloaded_path).stem
+                            if ingested_paper_id in paper_cards:
+                                del paper_cards[ingested_paper_id]
+                            st.success(
+                                f"Ingested {ingested_paper_id}: {len(chunks)} chunks."
+                            )
+                    except Exception as exc:
+                        st.error(f"{paper_title}: download/ingest failed. {exc}")
 
 with tab_upload:
     st.caption(f"Uploaded files are saved to: {UPLOAD_DIR}")
