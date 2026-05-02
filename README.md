@@ -93,6 +93,21 @@ python scripts/smoke_bm25.py data/uploads/example.pdf "program alignment"
 - 不需要 `.env`。
 - 不调用 LLM。
 
+## Smoke test: vector retrieval
+运行命令：
+
+```bash
+python scripts/smoke_vector.py data/uploads/example.pdf "program alignment"
+```
+
+说明：
+- 第一次运行可能会下载 sentence-transformers 模型。
+
+成功标准：
+- 能打印 top-k chunks。
+- 不需要 `.env`。
+- 不调用 LLM。
+
 ## third_party 参考作用
 `third_party/` 下各项目仅作为参考，不参与本仓库业务代码修改：
 
