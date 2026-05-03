@@ -1,0 +1,19 @@
+[submodule "third_party/paper-qa"]
+	path = third_party/paper-qa
+	url = https://github.com/future-house/paper-qa.git
+
+[submodule "third_party/gpt-researcher"]
+	path = third_party/gpt-researcher
+	url = https://github.com/assafelovic/gpt-researcher.git
+
+[submodule "third_party/storm"]
+	path = third_party/storm
+	url = https://github.com/stanford-oval/storm.git
+
+[submodule "third_party/litllm"]
+	path = third_party/litllm
+	url = https://github.com/litllm/litllm.git
+
+[submodule "third_party/ScholarLens"]
+	path = third_party/ScholarLens
+	url = https://github.com/ankush0511/ScholarLens.git
