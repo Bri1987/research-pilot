@@ -36,6 +36,9 @@ def generate_literature_review(
         "你只能基于用户提供的 paper cards 写作，不得编造任何信息。"
         "输出必须为中文 Markdown。"
         "请在每个关键结论后标注来源，格式为“（来源：paper_id）”或“（来源：title）”。"
+        "请使用保守措辞，避免 paper cards 难以直接支持的强表述。"
+        "若没有明确证据，请使用“是一个研究问题”“在相关研究中被讨论”“在某些应用场景中具有意义”等表述。"
+        "避免使用“长期存在且重要”“被广泛证明”“完全解决”“显著优于所有方法”等强断言。"
     )
     user_prompt = (
         f"研究主题：{topic_text}\n\n"
@@ -48,7 +51,7 @@ def generate_literature_review(
         "## 4. 当前局限\n\n"
         "## 5. Research Gaps\n\n"
         "## 6. Future Directions\n\n"
-        "要求：不要编造 paper cards 中不存在的信息。"
+        "要求：不要编造 paper cards 中不存在的信息；对背景判断尽量使用保守措辞。"
     )
 
     return chat_completion(

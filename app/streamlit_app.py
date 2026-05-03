@@ -27,7 +27,7 @@ st.set_page_config(
     page_title="ResearchPilot",
     layout="wide",
 )
-st.title("ResearchPilot: Citation-Grounded AI Research Assistant")
+st.title("ResearchPilot")
 
 if "pipeline" not in st.session_state:
     st.session_state["pipeline"] = ResearchPilotPipeline()
@@ -347,7 +347,7 @@ with tab_watchlist:
             )
 
 with tab_upload:
-    st.caption(f"Uploaded files are saved to: {UPLOAD_DIR}")
+    st.caption("Uploaded files are saved to: ./data/uploads")
     uploaded_files = st.file_uploader(
         "Select one or more PDF files",
         type=["pdf"],
@@ -416,6 +416,7 @@ with tab_ask:
                 st.error(f"RAG QA failed: {exc}")
 
 with tab_cards:
+    st.caption("Paper card cache file: ./data/outputs/paper_cards_cache.json")
     papers = pipeline.list_papers()
     if not papers:
         st.info("No papers ingested yet. Please upload and ingest PDFs first.")
@@ -612,14 +613,51 @@ with tab_review:
                 "Evidence chunks per claim",
                 min_value=2,
                 max_value=6,
-                value=4,
+                value=5,
             )
+            verification_mode = st.selectbox(
+                "Verification mode",
+                options=["balanced", "strict", "lenient"],
+                index=0,
+            )
+            source_first = st.checkbox(
+                "Use source-aware evidence retrieval",
+                value=True,
+            )
+            source_only_when_available = st.checkbox(
+                "Use source-only evidence when source is available",
+                value=True,
+            )
+            diversify_evidence = st.checkbox(
+                "Diversify evidence across papers",
+                value=True,
+            )
+            max_per_paper = 2
+            if diversify_evidence:
+                max_per_paper = st.slider(
+                    "Max evidence chunks per paper",
+                    min_value=1,
+                    max_value=3,
+                    value=2,
+                )
+                st.caption(
+                    "This limit is used for diverse retrieval or multiple-source claims. "
+                    "If source-only mode matches a single source paper, the verifier will "
+                    "use only that source paper and may take up to Evidence chunks per claim from it."
+                )
+            st.caption(f"Current verification mode: {verification_mode}")
             if st.button("Verify Claims", width="stretch"):
                 try:
                     with st.spinner("Verifying claims..."):
                         results = pipeline.verify_literature_review(
                             current_text,
                             top_k=verify_top_k,
+                            verification_mode=verification_mode,
+                            diversify_evidence=diversify_evidence,
+                            max_per_paper=max_per_paper,
+                            source_first=source_first,
+                            source_only_when_available=source_only_when_available,
+                            paper_cards=st.session_state.get("paper_cards", {}),
                         )
                     review_versions[selected_idx]["verification"] = results
                     st.session_state["review_versions"] = review_versions
@@ -667,6 +705,54 @@ with tab_review:
                         st.markdown(
                             f"**best_evidence**: {item.get('best_evidence', [])}"
                         )
+                        retrieval_meta = item.get("evidence_retrieval_meta", {}) or {}
+                        st.markdown("**Evidence retrieval meta**")
+                        st.markdown(
+                            f"**source_hints**: {retrieval_meta.get('source_hints', [])}"
+                        )
+                        st.markdown(
+                            "**matched_source_paper_ids**: "
+                            f"{retrieval_meta.get('matched_source_paper_ids', [])}"
+                        )
+                        st.markdown(
+                            "**matched_source_titles**: "
+                            f"{retrieval_meta.get('matched_source_titles', [])}"
+                        )
+                        st.markdown(
+                            "**source_match_failed**: "
+                            f"{retrieval_meta.get('source_match_failed', False)}"
+                        )
+                        st.markdown(
+                            "**source_match_confidence**: "
+                            f"{retrieval_meta.get('source_match_confidence', None)}"
+                        )
+                        st.markdown(
+                            f"**source_first**: {retrieval_meta.get('source_first', False)}"
+                        )
+                        st.markdown(
+                            "**source_only_when_available**: "
+                            f"{retrieval_meta.get('source_only_when_available', False)}"
+                        )
+                        st.markdown(
+                            "**source_only_effective**: "
+                            f"{retrieval_meta.get('source_only_effective', False)}"
+                        )
+                        st.markdown(
+                            "**single_source_mode**: "
+                            f"{retrieval_meta.get('single_source_mode', False)}"
+                        )
+                        st.markdown(
+                            "**diversify_evidence**: "
+                            f"{retrieval_meta.get('diversify_evidence', False)}"
+                        )
+                        if (
+                            retrieval_meta.get("source_hints")
+                            and retrieval_meta.get("source_match_failed", False)
+                        ):
+                            st.warning(
+                                "Source hint was found but could not be confidently matched "
+                                "to an ingested paper. Falling back to diverse retrieval."
+                            )
                         suggested_rewrite = str(
                             item.get("suggested_rewrite", "")
                         ).strip()
@@ -677,6 +763,14 @@ with tab_review:
                         if not evidence_list:
                             st.info("No evidence.")
                         else:
+                            source_counts: dict[str, int] = {}
+                            for ev in evidence_list:
+                                pid = str(ev.get("paper_id", "") or "unknown")
+                                source_counts[pid] = source_counts.get(pid, 0) + 1
+                            st.markdown("**Evidence source coverage:**")
+                            for pid, count in source_counts.items():
+                                st.markdown(f"- {pid}: {count} chunks")
+
                             for idx, ev in enumerate(evidence_list, start=1):
                                 paper_id = ev.get("paper_id", "")
                                 page = ev.get("page", "")

@@ -8,3 +8,4 @@ data/uploads/*
 data/chunks/*
 data/indices/*
 data/outputs/*
+*.log
