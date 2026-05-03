@@ -116,8 +116,16 @@ OPENAI_MODEL=
 
 说明：
 - 不要提交 `.env` 到仓库。
+
 - 使用 OpenAI-compatible chat completions。
+
 - 不要使用 `/v1/completions` + `messages` 组合。
+
+  示例OPENAI_API_KEY=sk-xxxxx
+
+  OPENAI_BASE_URL=https://llmapi.paratera.com/v1
+
+  OPENAI_MODEL=DeepSeek-V3.2
 
 ### 4.4 启动应用
 推荐命令：
