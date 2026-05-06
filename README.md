@@ -109,9 +109,15 @@ pip install -r requirements.txt
 从 `.env.example` 复制为 `.env`，并填写：
 
 ```env
+LLM_PROVIDER=openai
+
 OPENAI_API_KEY=
 OPENAI_BASE_URL=
 OPENAI_MODEL=
+
+DEEPSEEK_API_KEY=
+DEEPSEEK_BASE_URL=https://api.deepseek.com
+DEEPSEEK_MODEL=deepseek-v4-flash
 ```
 
 说明：
@@ -121,11 +127,25 @@ OPENAI_MODEL=
 
 - 不要使用 `/v1/completions` + `messages` 组合。
 
-  示例OPENAI_API_KEY=sk-xxxxx
+  OpenAI-compatible 示例：
 
+  ```env
+  LLM_PROVIDER=openai
+  OPENAI_API_KEY=sk-xxxxx
   OPENAI_BASE_URL=https://llmapi.paratera.com/v1
-
   OPENAI_MODEL=DeepSeek-V3.2
+  ```
+
+  DeepSeek 官方 API 示例：
+
+  ```env
+  LLM_PROVIDER=deepseek
+  DEEPSEEK_API_KEY=sk-xxxxx
+  DEEPSEEK_BASE_URL=https://api.deepseek.com
+  DEEPSEEK_MODEL=deepseek-v4-flash
+  ```
+
+  DeepSeek 官方 API 使用 OpenAI-compatible chat completions，`base_url` 为 `https://api.deepseek.com`。截至 2026-05-06，DeepSeek 官方文档列出的推荐模型包括 `deepseek-v4-flash` 和 `deepseek-v4-pro`，`deepseek-chat` / `deepseek-reasoner` 将于 2026-07-24 废弃。
 
 ### 4.4 启动应用
 推荐命令：

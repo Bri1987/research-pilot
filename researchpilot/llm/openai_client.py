@@ -1,6 +1,29 @@
 from openai import OpenAI
 
-from researchpilot.config import get_config
+from researchpilot.config import AppConfig, get_config
+
+
+def _resolve_llm_settings(config: AppConfig) -> tuple[str, str | None, str]:
+    if config.llm_provider == "deepseek":
+        api_key = (config.deepseek_api_key or "").strip()
+        if not api_key:
+            raise RuntimeError(
+                "DEEPSEEK_API_KEY is missing. Please set it in your environment or .env file."
+            )
+        return api_key, config.deepseek_base_url.strip(), config.deepseek_model
+
+    if config.llm_provider == "openai":
+        api_key = (config.openai_api_key or "").strip()
+        if not api_key:
+            raise RuntimeError(
+                "OPENAI_API_KEY is missing. Please set it in your environment or .env file."
+            )
+        base_url = config.openai_base_url.strip() if config.openai_base_url else None
+        return api_key, base_url, config.openai_model
+
+    raise RuntimeError(
+        f"Unsupported LLM_PROVIDER: {config.llm_provider}. Expected 'openai' or 'deepseek'."
+    )
 
 
 def chat_completion(
@@ -9,19 +32,15 @@ def chat_completion(
     max_tokens: int | None = None,
 ) -> str:
     config = get_config()
-    api_key = (config.openai_api_key or "").strip()
-    if not api_key:
-        raise RuntimeError(
-            "OPENAI_API_KEY is missing. Please set it in your environment or .env file."
-        )
+    api_key, base_url, model = _resolve_llm_settings(config)
 
-    if config.openai_base_url:
-        client = OpenAI(api_key=api_key, base_url=config.openai_base_url)
+    if base_url:
+        client = OpenAI(api_key=api_key, base_url=base_url)
     else:
         client = OpenAI(api_key=api_key)
 
     request_kwargs = {
-        "model": config.openai_model,
+        "model": model,
         "messages": messages,
         "temperature": temperature,
     }
