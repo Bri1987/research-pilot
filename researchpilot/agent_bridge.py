@@ -128,24 +128,32 @@ def run_agent_task(
     paths = _task_paths(str(task["task_id"]))
     task = _update_task(task, status="running")
 
-    custom_command = os.getenv("RESEARCHPILOT_AGENT_COMMAND", "").strip()
-    if normalized_provider == "custom":
-        if not custom_command:
-            raise AgentBridgeError("RESEARCHPILOT_AGENT_COMMAND is not configured.")
-        command = shlex.split(custom_command)
-        stdin_text = prompt
-    elif normalized_provider == "codex":
-        if not _command_exists("codex"):
-            raise AgentBridgeError("codex CLI was not found on PATH.")
-        command = _codex_command(model=model)
-        stdin_text = prompt
-    elif normalized_provider == "opencode":
-        if not _command_exists("opencode"):
-            raise AgentBridgeError("opencode CLI was not found on PATH.")
-        command = _opencode_command(paths["prompt"], model=model)
-        stdin_text = ""
-    else:
-        raise AgentBridgeError(f"Unsupported agent bridge provider: {provider}")
+    try:
+        custom_command = os.getenv("RESEARCHPILOT_AGENT_COMMAND", "").strip()
+        if normalized_provider == "custom":
+            if not custom_command:
+                raise AgentBridgeError("RESEARCHPILOT_AGENT_COMMAND is not configured.")
+            command = shlex.split(custom_command)
+            stdin_text = prompt
+        elif normalized_provider == "codex":
+            if not _command_exists("codex"):
+                raise AgentBridgeError("codex CLI was not found on PATH.")
+            command = _codex_command(model=model)
+            stdin_text = prompt
+        elif normalized_provider == "opencode":
+            if not _command_exists("opencode"):
+                raise AgentBridgeError("opencode CLI was not found on PATH.")
+            command = _opencode_command(paths["prompt"], model=model)
+            stdin_text = ""
+        else:
+            raise AgentBridgeError(f"Unsupported agent bridge provider: {provider}")
+    except (AgentBridgeError, ValueError) as exc:
+        error = str(exc)
+        paths["stderr"].write_text(error, encoding="utf-8")
+        _update_task(task, status="failed", error=error)
+        if isinstance(exc, AgentBridgeError):
+            raise
+        raise AgentBridgeError(error) from exc
 
     try:
         completed = subprocess.run(

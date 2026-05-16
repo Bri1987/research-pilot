@@ -1,10 +1,10 @@
 ---
-name: research-pilot
-description: Use ResearchPilot to run local scientific-literature workflows: arXiv and CCF conference/journal discovery, PDF or text ingestion, evidence retrieval, citation-grounded QA, paper cards, comparison tables, literature reviews, claim-level citation verification, conservative rewrites, research ideas, and watchlist ranking.
-compatibility: opencode
+name: "research-pilot"
+description: "Use ResearchPilot to run local scientific-literature workflows: arXiv and CCF conference/journal discovery, PDF or text ingestion, evidence retrieval, citation-grounded QA, paper cards, comparison tables, literature reviews, claim-level citation verification, conservative rewrites, research ideas, and watchlist ranking."
+compatibility: "opencode"
 metadata:
-  project: ResearchPilot
-  tool_prefix: researchpilot
+  project: "ResearchPilot"
+  tool_prefix: "researchpilot"
 ---
 
 # ResearchPilot

@@ -576,6 +576,12 @@ def cmd_collect_venue_papers(args: dict[str, Any]) -> dict[str, Any]:
 
     from researchpilot.discovery.venue_collector import collect_venue_papers
 
+    raw_min_relevance_score = args.get("min_relevance_score", 1.0)
+    if raw_min_relevance_score is None or raw_min_relevance_score == "":
+        min_relevance_score = 1.0
+    else:
+        min_relevance_score = float(raw_min_relevance_score)
+
     collection = collect_venue_papers(
         topic=topic,
         domains=_as_list(args.get("domains")),
@@ -591,7 +597,7 @@ def cmd_collect_venue_papers(args: dict[str, Any]) -> dict[str, Any]:
         include_broad_openalex=_as_bool(args.get("include_broad_openalex"), default=True),
         include_semantic_scholar=_as_bool(args.get("include_semantic_scholar"), default=False),
         include_broad_semantic_scholar=_as_bool(args.get("include_broad_semantic_scholar"), default=True),
-        min_relevance_score=float(args.get("min_relevance_score", 1.0) or 1.0),
+        min_relevance_score=min_relevance_score,
     )
 
     output_path = None
