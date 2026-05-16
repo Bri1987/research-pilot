@@ -1,0 +1,7 @@
+interface:
+  display_name: "ResearchPilot"
+  short_description: "Paper discovery, CCF venue collection, local RAG, and claim verification"
+  default_prompt: "Use $research-pilot to collect CCF venue papers, ingest PDFs, answer with evidence, and run a verify-then-rewrite literature review loop."
+
+policy:
+  allow_implicit_invocation: true
