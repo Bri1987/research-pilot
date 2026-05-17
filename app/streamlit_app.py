@@ -1351,6 +1351,24 @@ def _safe_widget_key(value: str) -> str:
     return re.sub(r"[^A-Za-z0-9_]+", "_", str(value or "item"))[:120]
 
 
+def _prune_multiselect_state(key: str, options: list[str]) -> None:
+    if key not in st.session_state:
+        return
+    current_values = st.session_state.get(key, [])
+    if not isinstance(current_values, list):
+        st.session_state[key] = []
+        return
+    valid_options = {str(option) for option in options}
+    pruned_values: list[str] = []
+    seen_values: set[str] = set()
+    for raw_value in current_values:
+        value = str(raw_value or "").strip()
+        if value in valid_options and value not in seen_values:
+            pruned_values.append(value)
+            seen_values.add(value)
+    st.session_state[key] = pruned_values
+
+
 def _join_display(values: object, empty: str = "未记录") -> str:
     items = [str(item).strip() for item in (values or []) if str(item).strip()] if isinstance(values, list) else []
     if not items:
@@ -3063,12 +3081,14 @@ with tab_cards:
                 single_label_col, batch_label_col = st.columns(2)
                 with single_label_col:
                     st.markdown("#### 单篇标注")
+                    single_existing_key = f"single_existing_labels_{_safe_widget_key(selected_paper_id)}"
                     current_labels = labels_for_paper(selected_paper_id, paper_labels)
+                    _prune_multiselect_state(single_existing_key, available_labels)
                     selected_existing_labels = st.multiselect(
                         "Existing labels",
                         options=available_labels,
                         default=[label for label in current_labels if label in available_labels],
-                        key=f"single_existing_labels_{_safe_widget_key(selected_paper_id)}",
+                        key=single_existing_key,
                     )
                     new_labels_text = st.text_input(
                         "New labels",
@@ -3090,6 +3110,7 @@ with tab_cards:
                         st.rerun()
                 with batch_label_col:
                     st.markdown("#### 批量标注")
+                    _prune_multiselect_state("batch_label_targets", all_selectable_papers)
                     batch_targets = st.multiselect(
                         "Papers",
                         options=all_selectable_papers,
@@ -3097,6 +3118,7 @@ with tab_cards:
                         format_func=_paper_option_label,
                         key="batch_label_targets",
                     )
+                    _prune_multiselect_state("batch_existing_labels", available_labels)
                     batch_existing_labels = st.multiselect(
                         "Batch existing labels",
                         options=available_labels,
@@ -3166,19 +3188,7 @@ with tab_cards:
                     key="paper_label_agent_timeout",
                 )
             agent_targets_key = "paper_label_agent_targets"
-            if agent_targets_key in st.session_state:
-                valid_agent_targets = set(unlabeled_papers)
-                current_agent_targets = st.session_state.get(agent_targets_key, [])
-                if not isinstance(current_agent_targets, list):
-                    current_agent_targets = []
-                pruned_agent_targets: list[str] = []
-                seen_agent_targets: set[str] = set()
-                for raw_paper_id in current_agent_targets:
-                    paper_id = str(raw_paper_id or "").strip()
-                    if paper_id in valid_agent_targets and paper_id not in seen_agent_targets:
-                        pruned_agent_targets.append(paper_id)
-                        seen_agent_targets.add(paper_id)
-                st.session_state[agent_targets_key] = pruned_agent_targets
+            _prune_multiselect_state(agent_targets_key, unlabeled_papers)
             agent_target_kwargs = {
                 "label": "Selected unlabeled papers for agent",
                 "options": unlabeled_papers,
@@ -4035,6 +4045,7 @@ with tab_library:
             key="library_label_filter",
         )
         with batch_col:
+            _prune_multiselect_state("library_batch_label_targets", library_paper_ids)
             library_batch_targets = st.multiselect(
                 "Batch label papers",
                 options=library_paper_ids,
@@ -4043,6 +4054,7 @@ with tab_library:
             )
             lib_label_cols = st.columns([0.34, 0.34, 0.16, 0.16])
             with lib_label_cols[0]:
+                _prune_multiselect_state("library_existing_labels", available_labels)
                 library_existing_labels = st.multiselect(
                     "Existing labels",
                     options=available_labels,

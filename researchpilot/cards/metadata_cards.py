@@ -25,7 +25,7 @@ def normalize_doi(value: Any) -> str:
         return ""
     doi = re.sub(r"^doi\s*:\s*", "", doi)
     doi = re.sub(r"^(?:https?://)?(?:dx\.)?doi\.org/", "", doi)
-    return doi.strip().rstrip(".,;")
+    return doi.strip()
 
 
 def metadata_paper_id(paper: dict[str, Any]) -> str:
