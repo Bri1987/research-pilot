@@ -50,6 +50,7 @@ def _clean_watch_item(item: dict) -> dict:
         "authors": _normalize_text_list(item.get("authors", [])),
         "institutions": _normalize_text_list(item.get("institutions", [])),
         "keywords": _normalize_text_list(item.get("keywords", [])),
+        "homepage_urls": _normalize_text_list(item.get("homepage_urls", [])),
         "notes": notes,
     }
 
