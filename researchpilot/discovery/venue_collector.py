@@ -507,15 +507,15 @@ def _doi_key(value: Any) -> str:
 def _prefer_paper(current: dict[str, Any], candidate: dict[str, Any]) -> dict[str, Any]:
     current_score = float(current.get("relevance_score", 0.0) or 0.0)
     candidate_score = float(candidate.get("relevance_score", 0.0) or 0.0)
+    current_doi = _doi_key(current.get("doi"))
+    candidate_doi = _doi_key(candidate.get("doi"))
+    if candidate_doi and not current_doi:
+        return candidate
+    if current_doi and not candidate_doi:
+        return current
     if candidate.get("source") == "openreview" and current.get("source") != "openreview":
         return candidate
     if candidate_score > current_score:
-        return candidate
-    if (
-        candidate_score == current_score
-        and _doi_key(candidate.get("doi"))
-        and not _doi_key(current.get("doi"))
-    ):
         return candidate
     return current
 
@@ -536,10 +536,12 @@ def _matching_dedupe_group(
     if not title_matches:
         return None
 
+    no_doi_matches = sorted(idx for idx in title_matches if not groups[idx]["dois"])
     if not doi:
+        if no_doi_matches:
+            return no_doi_matches[0]
         return next(iter(title_matches)) if len(title_matches) == 1 else None
 
-    no_doi_matches = [idx for idx in title_matches if not groups[idx]["dois"]]
     if len(title_matches) == 1 and no_doi_matches:
         return no_doi_matches[0]
     return None
