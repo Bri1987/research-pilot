@@ -314,10 +314,17 @@ def _title_key(title: str) -> str:
     return re.sub(r"[^a-z0-9\u4e00-\u9fff]+", "", str(title or "").lower())
 
 
+def _doi_key(value: Any) -> str:
+    doi = str(value or "").strip().lower()
+    doi = re.sub(r"^https?://(dx\.)?doi\.org/", "", doi)
+    doi = re.sub(r"^doi:\s*", "", doi)
+    return doi.strip()
+
+
 def _dedupe_papers(papers: list[dict[str, Any]]) -> list[dict[str, Any]]:
     best: dict[str, dict[str, Any]] = {}
     for paper in papers:
-        key = str(paper.get("doi") or "").lower().strip() or metadata_paper_id(paper) or _title_key(str(paper.get("title", "")))
+        key = _doi_key(paper.get("doi")) or metadata_paper_id(paper) or _title_key(str(paper.get("title", "")))
         if not key:
             continue
         current = best.get(key)
@@ -405,6 +412,11 @@ def track_watch_item(
         ),
         reverse=True,
     )
+    visible_papers = [
+        paper
+        for paper in papers
+        if str(paper.get("paper_id", "") or "") not in dismissed
+    ][:max_results]
 
     result = {
         "watch_key": key,
@@ -421,8 +433,8 @@ def track_watch_item(
         "cutoff_date": cutoff.isoformat(),
         "query": query,
         "homepage_index": homepage_index_for_watch_item(item),
-        "papers": papers[:max_results],
-        "paper_count": len(papers[:max_results]),
+        "papers": visible_papers,
+        "paper_count": len(visible_papers),
         "dismissed_paper_ids": dismissed,
         "warnings": warnings,
     }
