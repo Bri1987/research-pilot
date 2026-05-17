@@ -1430,12 +1430,17 @@ def _agent_label_prompt(target_paper_ids: list[str], existing_labels: list[str])
     )
 
 
-def _apply_agent_label_assignments(response_text: str) -> tuple[int, list[str]]:
+def _apply_agent_label_assignments(
+    response_text: str,
+    allowed_paper_ids: list[str] | set[str],
+) -> tuple[int, list[str]]:
     parsed = _extract_json_object(response_text)
     assignments = parsed.get("assignments", []) if isinstance(parsed, dict) else []
     if not isinstance(assignments, list):
         return 0, ["Agent response did not contain an assignments list."]
 
+    allowed_ids = {str(paper_id or "").strip() for paper_id in allowed_paper_ids}
+    allowed_ids.discard("")
     labels = load_paper_labels()
     applied = 0
     skipped: list[str] = []
@@ -1444,6 +1449,9 @@ def _apply_agent_label_assignments(response_text: str) -> tuple[int, list[str]]:
             continue
         paper_id = str(item.get("paper_id", "")).strip()
         if not paper_id:
+            continue
+        if paper_id not in allowed_ids:
+            skipped.append(f"{paper_id}: not in requested target set")
             continue
         if labels_for_paper(paper_id, labels):
             skipped.append(f"{paper_id}: already labeled")
@@ -3199,7 +3207,7 @@ with tab_cards:
                         if result["mode"] == "queued":
                             st.info(result["output"])
                         else:
-                            applied, skipped = _apply_agent_label_assignments(result["output"])
+                            applied, skipped = _apply_agent_label_assignments(result["output"], target_ids)
                             st.success(f"Agent labels applied: {applied}")
                             if skipped:
                                 st.caption("Skipped: " + "; ".join(skipped[:8]))
