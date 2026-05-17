@@ -511,6 +511,12 @@ def _prefer_paper(current: dict[str, Any], candidate: dict[str, Any]) -> dict[st
         return candidate
     if candidate_score > current_score:
         return candidate
+    if (
+        candidate_score == current_score
+        and _doi_key(candidate.get("doi"))
+        and not _doi_key(current.get("doi"))
+    ):
+        return candidate
     return current
 
 
