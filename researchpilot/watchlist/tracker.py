@@ -275,9 +275,22 @@ def _is_recent(paper: dict[str, Any], cutoff: date) -> bool:
         return False
 
 
+def _term_matches(text: str, term: str) -> bool:
+    candidate = str(term or "").strip()
+    haystack = str(text or "")
+    if not candidate or not haystack:
+        return False
+    if not re.search(r"[A-Za-z0-9]", candidate):
+        return candidate.casefold() in haystack.casefold()
+    body = r"\s+".join(re.escape(part) for part in re.split(r"\s+", candidate) if part)
+    if not body:
+        return False
+    pattern = rf"(?<![A-Za-z0-9_\u4e00-\u9fff]){body}(?![A-Za-z0-9_\u4e00-\u9fff])"
+    return re.search(pattern, haystack, flags=re.IGNORECASE) is not None
+
+
 def _contains_any(text: str, terms: list[str]) -> list[str]:
-    lowered = str(text or "").lower()
-    return [term for term in terms if term and term.lower() in lowered]
+    return [term for term in terms if _term_matches(text, term)]
 
 
 def _match_watch_item(paper: dict[str, Any], item: dict[str, Any]) -> list[str]:
@@ -303,7 +316,7 @@ def _match_watch_item(paper: dict[str, Any], item: dict[str, Any]) -> list[str]:
         reasons.append(f"institution:{institution}")
     for keyword in _contains_any(text, keywords):
         reasons.append(f"keyword:{keyword}")
-    if name and name.lower() in text.lower():
+    if _term_matches(text, name):
         reasons.append(f"name:{name}")
     if not reasons and not (authors or institutions or keywords):
         reasons.append("query_match")

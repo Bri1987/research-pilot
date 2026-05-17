@@ -2213,7 +2213,8 @@ def _render_default_research_discovery() -> None:
             with st.expander("Google Scholar follow-up links"):
                 for item in scholar_urls[:20]:
                     if isinstance(item, dict):
-                        st.markdown(f"- [{item.get('label', 'Scholar')}]({item.get('url', '')})")
+                        label = item.get("label") or item.get("venue") or "Scholar"
+                        st.markdown(f"- [{label}]({item.get('url', '')})")
 
     rows = _collection_rows(venue_collection)
     if rows:
