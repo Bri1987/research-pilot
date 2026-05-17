@@ -3157,14 +3157,30 @@ with tab_cards:
                     step=60,
                     key="paper_label_agent_timeout",
                 )
-            agent_selected_targets = st.multiselect(
-                "Selected unlabeled papers for agent",
-                options=unlabeled_papers,
-                default=unlabeled_papers[: min(8, len(unlabeled_papers))],
-                format_func=_paper_option_label,
-                key="paper_label_agent_targets",
-                disabled=agent_target_mode == "All unlabeled",
-            )
+            agent_targets_key = "paper_label_agent_targets"
+            if agent_targets_key in st.session_state:
+                valid_agent_targets = set(unlabeled_papers)
+                current_agent_targets = st.session_state.get(agent_targets_key, [])
+                if not isinstance(current_agent_targets, list):
+                    current_agent_targets = []
+                pruned_agent_targets: list[str] = []
+                seen_agent_targets: set[str] = set()
+                for raw_paper_id in current_agent_targets:
+                    paper_id = str(raw_paper_id or "").strip()
+                    if paper_id in valid_agent_targets and paper_id not in seen_agent_targets:
+                        pruned_agent_targets.append(paper_id)
+                        seen_agent_targets.add(paper_id)
+                st.session_state[agent_targets_key] = pruned_agent_targets
+            agent_target_kwargs = {
+                "label": "Selected unlabeled papers for agent",
+                "options": unlabeled_papers,
+                "format_func": _paper_option_label,
+                "key": agent_targets_key,
+                "disabled": agent_target_mode == "All unlabeled",
+            }
+            if agent_targets_key not in st.session_state:
+                agent_target_kwargs["default"] = unlabeled_papers[: min(8, len(unlabeled_papers))]
+            agent_selected_targets = st.multiselect(**agent_target_kwargs)
             if st.button("Run / Queue Agent Labeling", width="stretch", key="run_agent_labeling"):
                 target_ids = unlabeled_papers if agent_target_mode == "All unlabeled" else agent_selected_targets
                 if not target_ids:

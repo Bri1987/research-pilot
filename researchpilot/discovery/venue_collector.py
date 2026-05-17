@@ -504,17 +504,6 @@ def _doi_key(value: Any) -> str:
     return normalize_doi(value)
 
 
-def _paper_dedupe_keys(paper: dict[str, Any]) -> list[str]:
-    keys: list[str] = []
-    doi = _doi_key(paper.get("doi"))
-    if doi:
-        keys.append(f"doi:{doi}")
-    title = _title_key(str(paper.get("title", "")))
-    if title:
-        keys.append(f"title:{title}")
-    return keys
-
-
 def _prefer_paper(current: dict[str, Any], candidate: dict[str, Any]) -> dict[str, Any]:
     current_score = float(current.get("relevance_score", 0.0) or 0.0)
     candidate_score = float(candidate.get("relevance_score", 0.0) or 0.0)
@@ -525,38 +514,57 @@ def _prefer_paper(current: dict[str, Any], candidate: dict[str, Any]) -> dict[st
     return current
 
 
+def _matching_dedupe_group(
+    doi: str,
+    title: str,
+    groups: list[dict[str, Any]],
+    doi_index: dict[str, int],
+    title_index: dict[str, set[int]],
+) -> int | None:
+    if doi and doi in doi_index:
+        return doi_index[doi]
+    if not title:
+        return None
+
+    title_matches = title_index.get(title, set())
+    if not title_matches:
+        return None
+
+    if not doi:
+        return next(iter(title_matches)) if len(title_matches) == 1 else None
+
+    no_doi_matches = [idx for idx in title_matches if not groups[idx]["dois"]]
+    if len(title_matches) == 1 and no_doi_matches:
+        return no_doi_matches[0]
+    return None
+
+
 def deduplicate_papers(papers: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    best: dict[str, dict[str, Any]] = {}
+    groups: list[dict[str, Any]] = []
+    doi_index: dict[str, int] = {}
+    title_index: dict[str, set[int]] = {}
+
     for paper in papers:
-        keys = _paper_dedupe_keys(paper)
-        if not keys:
+        doi = _doi_key(paper.get("doi"))
+        title = _title_key(str(paper.get("title", "")))
+        if not doi and not title:
             continue
 
-        matches: list[dict[str, Any]] = []
-        for key in keys:
-            current = best.get(key)
-            if current is not None and all(current is not item for item in matches):
-                matches.append(current)
+        match_idx = _matching_dedupe_group(doi, title, groups, doi_index, title_index)
+        if match_idx is None:
+            match_idx = len(groups)
+            groups.append({"paper": paper, "dois": set(), "titles": set()})
+        else:
+            groups[match_idx]["paper"] = _prefer_paper(groups[match_idx]["paper"], paper)
 
-        selected = paper
-        for current in matches:
-            selected = _prefer_paper(current, selected)
+        if doi:
+            groups[match_idx]["dois"].add(doi)
+            doi_index[doi] = match_idx
+        if title:
+            groups[match_idx]["titles"].add(title)
+            title_index.setdefault(title, set()).add(match_idx)
 
-        for alias, current in list(best.items()):
-            if any(current is item for item in matches):
-                best[alias] = selected
-        for key in keys:
-            best[key] = selected
-
-    deduped: list[dict[str, Any]] = []
-    seen: set[int] = set()
-    for paper in best.values():
-        paper_identity = id(paper)
-        if paper_identity in seen:
-            continue
-        seen.add(paper_identity)
-        deduped.append(paper)
-    return deduped
+    return [group["paper"] for group in groups]
 
 
 def collect_venue_papers(
