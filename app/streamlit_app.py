@@ -1738,10 +1738,10 @@ def _add_tracking_paper_to_library(
         if not pdf_url:
             raise RuntimeError("This paper does not expose a PDF URL.")
         downloaded_path = download_pdf_from_url(pdf_url, output_dir="data/uploads")
-        chunks = pipeline.ingest_pdf(downloaded_path)
-        ingested_id = Path(downloaded_path).stem
-        if chunks and ingested_id in paper_cards:
-            del paper_cards[ingested_id]
+        chunks = pipeline.ingest_pdf(downloaded_path, paper_id=paper_id)
+        ingested_id = paper_id
+        if chunks and paper_id in paper_cards:
+            del paper_cards[paper_id]
             st.session_state["paper_cards"] = paper_cards
             save_paper_cards_cache(paper_cards)
     return paper_id, ingested_id
@@ -1832,9 +1832,10 @@ def _render_tracking_papers(item: dict, tracking: dict, idx: int) -> None:
                         item,
                         download_and_ingest=download_and_ingest,
                     )
-                    message = f"已生成 paper card: {card_id}"
                     if ingested_id:
-                        message += f"；已入库 PDF: {ingested_id}"
+                        message = f"已入库 PDF: {ingested_id}；metadata-only card 已清理"
+                    else:
+                        message = f"已生成 paper card: {card_id}"
                     st.success(message)
                     st.rerun()
                 except Exception as exc:
