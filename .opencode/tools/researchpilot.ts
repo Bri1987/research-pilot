@@ -1,5 +1,5 @@
 import { tool } from "@opencode-ai/plugin"
-import { spawn } from "child_process"
+import { spawn, spawnSync } from "child_process"
 import { existsSync } from "fs"
 import path from "path"
 
@@ -31,9 +31,12 @@ function pythonCandidates(root: string): string[] {
 function pickPython(root: string): string {
   for (const candidate of pythonCandidates(root)) {
     if (candidate.includes(path.sep) && !existsSync(candidate)) continue
-    return candidate
+    const probe = spawnSync(candidate, ["--version"], { stdio: "ignore" })
+    if (!probe.error && probe.status === 0) return candidate
   }
-  return "python3"
+  throw new Error(
+    "No usable Python interpreter found. Set RESEARCHPILOT_PYTHON or install python3.",
+  )
 }
 
 async function runResearchPilot(command: string, args: JsonRecord, context: ToolContext): Promise<string> {

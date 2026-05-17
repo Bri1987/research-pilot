@@ -112,15 +112,23 @@ def _keyword_matches_text(keyword: str, text: str, text_tokens: set[str]) -> boo
     normalized = str(keyword or "").lower().strip()
     if not normalized:
         return False
-    if normalized in text:
-        return True
+    if not re.search(r"[A-Za-z0-9]", normalized):
+        return normalized in text
+    phrase_parts = [re.escape(part) for part in re.split(r"\s+", normalized) if part]
+    if phrase_parts:
+        phrase = r"\s+".join(phrase_parts)
+        pattern = rf"(?<![A-Za-z0-9_\u4e00-\u9fff]){phrase}(?![A-Za-z0-9_\u4e00-\u9fff])"
+        if re.search(pattern, text, flags=re.IGNORECASE):
+            return True
     tokens = _tokenize(normalized)
     if not tokens:
         return False
     if len(tokens) == 1:
         return len(tokens[0]) >= 3 and tokens[0] in text_tokens
-    required = len(tokens) if len(tokens) <= 5 else max(2, int(len(tokens) * 0.8))
-    return sum(1 for token in tokens if token in text_tokens) >= required
+    if len(tokens) > 1:
+        required = len(tokens) if len(tokens) <= 5 else max(2, int(len(tokens) * 0.8))
+        return sum(1 for token in tokens if token in text_tokens) >= required
+    return False
 
 
 def _paper_domain_matches(paper: dict[str, Any], domains: list[str]) -> list[str]:
@@ -612,9 +620,6 @@ def collect_venue_papers(
         warnings.extend(source_warnings)
 
     deduped = deduplicate_papers(all_papers)
-    required_domains: list[str] = []
-    if {"ai", "formal_methods"}.issubset(set(plan_domains)):
-        required_domains = ["ai", "formal_methods"]
     for paper in deduped:
         if isinstance(paper, dict):
             paper["domain_matches"] = _paper_domain_matches(paper, plan_domains)
@@ -622,7 +627,6 @@ def collect_venue_papers(
         paper
         for paper in deduped
         if float(paper.get("relevance_score", 0.0) or 0.0) >= min_relevance_score
-        and (not required_domains or set(required_domains).issubset(set(paper.get("domain_matches", []))))
         and (include_broad_openalex or paper.get("collection_scope") != "broad_openalex")
         and (include_broad_semantic_scholar or paper.get("collection_scope") != "broad_semantic_scholar")
     ]
