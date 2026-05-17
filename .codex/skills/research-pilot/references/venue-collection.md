@@ -1,6 +1,6 @@
 # Venue Collection
 
-Use this workflow when the user asks for research-direction paper collection beyond arXiv, especially when they mention CCF conferences/journals, OpenReview, official conference pages, journals, or Google Scholar follow-up.
+Use this workflow when the user asks for research-direction paper collection across CCF conferences/journals and broader academic sources. By default `collect_venue_papers` includes arXiv, OpenReview, OpenAlex, and optional Semantic Scholar. Set `include_arxiv:false` only when the user explicitly wants to exclude arXiv.
 
 ## Workflow
 
@@ -43,12 +43,14 @@ If `.env` is configured and the user wants backend fallback, use `venue_paper_su
 - For cross-field topics, keep both sides. Example: formal verification + AI should include ML venues and formal-methods/PL venues.
 - Use `venues` to force include acronyms when the user names specific venues.
 - Use `domains` when topic wording is ambiguous, e.g. `["ai","formal_methods"]`.
+- Keep `include_arxiv:true` for default discovery; use the separate `search_arxiv` command or the web arXiv-only switch only when the user asks to look only at arXiv.
 - Set `include_broad_openalex:false` when the user wants only papers actually published in the selected venues.
 
 ## Source Semantics
 
 - `target_venue` is the venue ResearchPilot searched because it matched the topic/CCF plan.
-- `venue` is the actual source reported by OpenReview/OpenAlex.
+- `venue` is the actual source reported by arXiv/OpenReview/OpenAlex/Semantic Scholar.
+- `collection_scope:"arxiv"` means arXiv found a related topic-search paper.
 - `collection_scope:"venue"` means the paper is from the selected venue.
 - `collection_scope:"broad_openalex"` means OpenAlex found a related paper during venue-targeted search; do not present it as published in the target venue.
 - `collection_scope:"broad_semantic_scholar"` means Semantic Scholar found a related topic-search paper; manually confirm venue/source before making publication-venue claims.

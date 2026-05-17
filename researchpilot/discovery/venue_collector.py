@@ -18,6 +18,7 @@ from researchpilot.discovery.ccf_venues import infer_domains
 from researchpilot.discovery.ccf_venues import scholar_followup_urls
 from researchpilot.discovery.ccf_venues import select_venues
 from researchpilot.discovery.semantic_scholar import search_semantic_scholar
+from researchpilot.search.arxiv_search import search_arxiv_papers
 
 
 OPENALEX_WORKS_URL = "https://api.openalex.org/works"
@@ -415,14 +416,92 @@ def collect_semantic_scholar_for_topic(
     return papers, warnings
 
 
+def _year_from_date(value: Any) -> int | None:
+    match = re.search(r"\b(19|20)\d{2}\b", str(value or ""))
+    if not match:
+        return None
+    try:
+        return int(match.group(0))
+    except Exception:
+        return None
+
+
+def collect_arxiv_for_topic(
+    topic: str,
+    keywords: list[str],
+    domains: list[str],
+    years: list[int],
+    limit: int,
+) -> tuple[list[dict[str, Any]], list[str]]:
+    query_terms = [topic, *keywords[:8]]
+    query = " ".join(str(term).strip() for term in query_terms if str(term).strip())
+    warnings: list[str] = []
+    try:
+        results = search_arxiv_papers(
+            query=query,
+            max_results=limit,
+            sort_by="submitted_date",
+        )
+    except Exception as exc:
+        return [], [f"arXiv failed for topic query: {exc}"]
+
+    year_set = {int(year) for year in years} if years else set()
+    papers: list[dict[str, Any]] = []
+    for item in results:
+        if not isinstance(item, dict) or not str(item.get("title", "")).strip():
+            continue
+        year = _year_from_date(item.get("published") or item.get("updated"))
+        if year_set and year not in year_set:
+            continue
+        paper = {
+            "source": "arxiv",
+            "source_url": item.get("entry_id", ""),
+            "pdf_url": item.get("pdf_url", ""),
+            "arxiv_id": item.get("arxiv_id", ""),
+            "title": item.get("title", ""),
+            "authors": item.get("authors", []),
+            "year": year,
+            "publication_date": item.get("published", ""),
+            "venue": "arXiv",
+            "venue_full_name": "arXiv",
+            "venue_rank": "",
+            "venue_field": "",
+            "target_venue": "arXiv broad search",
+            "target_venue_full_name": "arXiv topic search",
+            "target_venue_rank": "",
+            "target_venue_field": "",
+            "matched_selected_venue": False,
+            "collection_scope": "arxiv",
+            "abstract": item.get("summary", ""),
+            "summary": item.get("summary", ""),
+            "primary_category": item.get("primary_category", ""),
+            "categories": item.get("categories", []),
+            "doi": "",
+            "cited_by_count": None,
+        }
+        score, matched = _paper_relevance(paper, keywords, venue=None)
+        paper["relevance_score"] = score
+        paper["matched_keywords"] = matched
+        paper["domain_matches"] = _paper_domain_matches(paper, domains)
+        papers.append(paper)
+    return papers, warnings
+
+
 def _title_key(title: str) -> str:
     return re.sub(r"[^a-z0-9\u4e00-\u9fff]+", "", str(title or "").lower())
+
+
+def _doi_key(value: Any) -> str:
+    doi = str(value or "").strip().lower()
+    doi = re.sub(r"^https?://(dx\.)?doi\.org/", "", doi)
+    doi = re.sub(r"^doi:\s*", "", doi)
+    return doi.strip()
 
 
 def deduplicate_papers(papers: list[dict[str, Any]]) -> list[dict[str, Any]]:
     best: dict[str, dict[str, Any]] = {}
     for paper in papers:
-        key = str(paper.get("doi") or "").lower().strip() or _title_key(str(paper.get("title", "")))
+        key = _doi_key(paper.get("doi")) or _title_key(str(paper.get("title", "")))
         if not key:
             continue
         current = best.get(key)
@@ -448,6 +527,7 @@ def collect_venue_papers(
     max_venues: int = 10,
     max_results_per_venue: int = 8,
     max_total: int = 60,
+    include_arxiv: bool = True,
     include_openreview: bool = True,
     include_openalex: bool = True,
     include_broad_openalex: bool = True,
@@ -487,6 +567,17 @@ def collect_venue_papers(
     all_papers: list[dict[str, Any]] = []
     warnings: list[str] = []
     plan_domains = [str(domain) for domain in plan.get("domains", []) if str(domain)]
+    if include_arxiv:
+        papers, source_warnings = collect_arxiv_for_topic(
+            topic=topic,
+            keywords=plan["keywords"],
+            domains=plan_domains,
+            years=years,
+            limit=max(1, min(max_total, max_results_per_venue * 2)),
+        )
+        all_papers.extend(papers)
+        warnings.extend(source_warnings)
+
     for venue in selected:
         if include_openreview and venue.openreview_id_template:
             papers, venue_warnings = collect_openreview_for_venue(
@@ -550,6 +641,13 @@ def collect_venue_papers(
         "years": years,
         "plan": plan,
         "paper_count": len(filtered),
+        "source_config": {
+            "arxiv": include_arxiv,
+            "openreview": include_openreview,
+            "openalex": include_openalex,
+            "semantic_scholar": include_semantic_scholar,
+            "include_journals": include_journals,
+        },
         "papers": [_compact_paper(paper) for paper in filtered],
         "warnings": warnings,
         "next_step": (

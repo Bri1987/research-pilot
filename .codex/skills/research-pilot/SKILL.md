@@ -38,7 +38,7 @@ Set `PYTHONPATH` to the project root only if importing `researchpilot` fails.
 1. Run `status` first to inspect corpus state, paper-card cache, watchlist state, and LLM environment.
 2. Add papers:
    - arXiv path: `search_arxiv` -> `download_arxiv_result` -> `ingest_pdf`.
-   - CCF venue path: `plan_venue_collection` -> `collect_venue_papers` (OpenReview/OpenAlex plus optional Semantic Scholar) -> `prepare_venue_paper_summary` -> `save_artifact`; optionally download/ingest selected PDFs afterward.
+   - CCF venue path: `plan_venue_collection` -> `collect_venue_papers` (arXiv/OpenReview/OpenAlex plus optional Semantic Scholar) -> `prepare_venue_paper_summary` -> `save_artifact`; optionally download/ingest selected PDFs afterward. Use `include_arxiv=false` only when the user explicitly wants to exclude arXiv from default discovery.
    - Existing PDF path: `ingest_pdf`.
    - Quick test path: `ingest_text`.
 3. Inspect evidence with `retrieve` before making synthesis claims.
@@ -55,7 +55,7 @@ For non-arXiv conference/journal discovery, especially CCF venue selection, Open
 - `status`: show project state and LLM configuration.
 - `search_arxiv`: search arXiv and save latest results.
 - `plan_venue_collection`: infer domains and CCF conference/journal venues for a topic.
-- `collect_venue_papers`: collect recent papers from OpenReview/OpenAlex and optional Semantic Scholar for selected venues/topic and save the latest collection.
+- `collect_venue_papers`: collect recent papers from arXiv/OpenReview/OpenAlex and optional Semantic Scholar for selected venues/topic and save the latest collection.
 - `download_arxiv_result`: download a saved arXiv result by 1-based rank.
 - `download_pdf`: download a direct PDF URL.
 - `ingest_pdf`: parse and chunk a local PDF into `data/agent_state/chunks.json`.
@@ -75,7 +75,7 @@ For non-arXiv conference/journal discovery, especially CCF venue selection, Open
 - `rewrite_review`: generate a conservative revised review.
 - `research_ideas`: generate candidate future research ideas.
 - `prepare_research_ideas`: agent-native research idea generation without `.env` LLM credentials.
-- `watchlist`: list/add/delete/rank/summarize watchlist items.
+- `watchlist`: list/add/delete/rank/summarize watchlist items; use `operation:"track"` to build homepage/profile indexes and collect recent papers for a scholar, institution, or research group, and `operation:"dismiss_paper"` to hide an uninteresting tracked recommendation.
 
 ## Examples
 

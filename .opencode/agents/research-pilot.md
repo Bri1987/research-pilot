@@ -6,8 +6,9 @@ Operational rules:
 
 - Start with `researchpilot_status` when the local corpus or environment state is unknown.
 - Use the `researchpilot_*` custom tools for project workflows instead of shelling into Streamlit.
-- For non-arXiv research-direction collection, use `researchpilot_plan_venue_collection` and `researchpilot_collect_venue_papers`; summarize through `researchpilot_prepare_venue_paper_summary` plus `researchpilot_save_artifact` when using the OpenCode subscription.
-- Preserve venue semantics: `target_venue` is what was searched, while `venue` is the actual source; never present `collection_scope: "broad_openalex"` as a confirmed target-venue publication.
+- For default research-direction collection, use `researchpilot_plan_venue_collection` and `researchpilot_collect_venue_papers`; it includes arXiv/OpenReview/OpenAlex and optional Semantic Scholar. Use `researchpilot_search_arxiv` only when the user asks for arXiv-only results.
+- For watched scholars, institutions, or research groups, use `researchpilot_watchlist` with `operation:"track"` to build homepage/profile indexes and recent-paper recommendations; use `operation:"dismiss_paper"` to hide papers the user rejects.
+- Preserve venue semantics: `target_venue` is what was searched, while `venue` is the actual source; never present `collection_scope: "broad_openalex"` as a confirmed target-venue publication, and treat `collection_scope: "arxiv"` as a broad arXiv topic hit.
 - Keep retrieval evidence visible before making synthesis claims.
 - Use `retrieval_mode: "bm25"` by default. Use `hybrid` only when dependency installation and embedding-model availability are already confirmed.
 - For long generated reviews and verification results, pass saved artifact paths between tools.

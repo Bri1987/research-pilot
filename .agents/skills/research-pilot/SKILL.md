@@ -16,11 +16,12 @@ Use this skill when the task is about scientific paper discovery, local-paper RA
 1. Call `researchpilot_status` first to inspect local corpus state, cached paper cards, watchlist state, and LLM configuration.
 2. Get papers into the local corpus:
    - Use `researchpilot_search_arxiv`, then `researchpilot_download_arxiv_result`, then `researchpilot_ingest_pdf`.
-   - For CCF conference/journal discovery, use `researchpilot_plan_venue_collection`, then `researchpilot_collect_venue_papers` (OpenReview/OpenAlex plus optional Semantic Scholar), then `researchpilot_prepare_venue_paper_summary` and `researchpilot_save_artifact`; optionally download/ingest selected PDFs afterward.
+   - For CCF conference/journal discovery, use `researchpilot_plan_venue_collection`, then `researchpilot_collect_venue_papers` (arXiv/OpenReview/OpenAlex plus optional Semantic Scholar), then `researchpilot_prepare_venue_paper_summary` and `researchpilot_save_artifact`; optionally download/ingest selected PDFs afterward. Pass `include_arxiv=false` only when the user explicitly wants to exclude arXiv from default discovery.
    - Or use `researchpilot_ingest_pdf` for existing PDFs.
    - Or use `researchpilot_ingest_text` for quick tool tests and non-PDF excerpts.
-3. Use `researchpilot_retrieve` for evidence inspection. Default `retrieval_mode` is `bm25`; use `hybrid` only when `sentence-transformers` and its embedding model are installed or cached.
-4. For LLM-heavy outputs, choose one of two supported modes:
+3. Use `researchpilot_watchlist` with `operation:"track"` to build homepage/profile indexes and collect recent papers for watched scholars, institutions, or research groups; use `operation:"dismiss_paper"` to hide uninteresting tracked recommendations.
+4. Use `researchpilot_retrieve` for evidence inspection. Default `retrieval_mode` is `bm25`; use `hybrid` only when `sentence-transformers` and its embedding model are installed or cached.
+5. For LLM-heavy outputs, choose one of two supported modes:
    - Agent-native mode: if the user wants to use the OpenCode subscription or `.env` is absent, read `references/agent-native-mode.md` and use the `researchpilot_prepare_*` / `researchpilot_save_*` tools.
    - Backend API fallback: if `OPENAI_API_KEY`, `OPENAI_BASE_URL`, and `OPENAI_MODEL` are configured, or the user explicitly asks for the project backend to run autonomously, use the original LLM-backed tools directly:
    - `researchpilot_ask`
@@ -31,7 +32,7 @@ Use this skill when the task is about scientific paper discovery, local-paper RA
    - `researchpilot_rewrite_review`
    - `researchpilot_research_ideas`
    - `researchpilot_watchlist` with `summarize_last_search`
-5. For a full review loop, run:
+6. For a full review loop, run:
    `build_paper_cards` -> `comparison_table` -> `literature_review` -> `verify_review` -> `rewrite_review` -> `research_ideas`.
 
 For non-arXiv CCF venue collection details, read `references/venue-collection.md`.

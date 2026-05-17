@@ -11,6 +11,7 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 WORKSPACE_DIR = PROJECT_ROOT / "data" / "outputs" / "workspace"
 AGENT_STATE_DIR = PROJECT_ROOT / "data" / "agent_state"
 AGENT_OUTPUT_DIR = PROJECT_ROOT / "data" / "outputs" / "agent"
+WATCHLIST_TRACKING_PATH = PROJECT_ROOT / "data" / "outputs" / "watchlist_tracking.json"
 LAST_VENUE_COLLECTION_PATH = AGENT_STATE_DIR / "last_venue_collection.json"
 CHUNKS_PATH = AGENT_STATE_DIR / "chunks.json"
 
@@ -152,6 +153,7 @@ def workspace_context_payload(
     return {
         "paper_cards": cards,
         "watchlist": watchlist[:30],
+        "watchlist_tracking": load_json(WATCHLIST_TRACKING_PATH, {}),
         "ingested_papers": load_agent_paper_summaries(limit=80),
         "latest_venue_collection": collection_summary,
         "workspace_reports": list_workspace_reports(limit=max_reports),

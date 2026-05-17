@@ -592,6 +592,7 @@ def cmd_collect_venue_papers(args: dict[str, Any]) -> dict[str, Any]:
         max_venues=_as_int(args.get("max_venues"), 10, minimum=1, maximum=30),
         max_results_per_venue=_as_int(args.get("max_results_per_venue"), 8, minimum=1, maximum=50),
         max_total=_as_int(args.get("max_total"), 60, minimum=1, maximum=200),
+        include_arxiv=_as_bool(args.get("include_arxiv"), default=True),
         include_openreview=_as_bool(args.get("include_openreview"), default=True),
         include_openalex=_as_bool(args.get("include_openalex"), default=True),
         include_broad_openalex=_as_bool(args.get("include_broad_openalex"), default=True),
@@ -1452,6 +1453,36 @@ def cmd_watchlist(args: dict[str, Any]) -> dict[str, Any]:
         if not isinstance(item, dict):
             raise AgentToolError("watchlist add requires item object.")
         return {"watchlist": add_watch_item(item)}
+
+    if operation == "track":
+        from researchpilot.watchlist.tracker import load_watchlist_tracking
+        from researchpilot.watchlist.tracker import track_watch_item
+
+        item = args.get("item")
+        if not isinstance(item, dict):
+            watchlist = load_watchlist()
+            index = _as_int(args.get("index"), -1)
+            if index < 0 or index >= len(watchlist):
+                raise AgentToolError("watchlist track requires item object or valid index.")
+            item = watchlist[index]
+        tracked = track_watch_item(
+            item,
+            months=_as_int(args.get("months"), 6, minimum=1, maximum=24),
+            max_results=_as_int(args.get("max_results"), 25, minimum=1, maximum=80),
+        )
+        return {"tracking": tracked, "tracking_state_count": len(load_watchlist_tracking())}
+
+    if operation == "dismiss_paper":
+        from researchpilot.watchlist.tracker import dismiss_watch_paper
+
+        watchlist = load_watchlist()
+        index = _as_int(args.get("index"), -1)
+        if index < 0 or index >= len(watchlist):
+            raise AgentToolError("watchlist dismiss_paper requires valid index.")
+        paper_id = str(args.get("paper_id", "") or "").strip()
+        if not paper_id:
+            raise AgentToolError("watchlist dismiss_paper requires paper_id.")
+        return {"tracking": dismiss_watch_paper(watchlist[index], paper_id)}
 
     if operation == "delete":
         index = _as_int(args.get("index"), -1)

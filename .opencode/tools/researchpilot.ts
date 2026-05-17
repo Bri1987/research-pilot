@@ -122,7 +122,7 @@ export const plan_venue_collection = tool({
 })
 
 export const collect_venue_papers = tool({
-  description: "Collect recent papers for selected CCF conferences/journals using OpenReview, OpenAlex, and optionally Semantic Scholar, with actual source URLs and broad-search follow-up hints.",
+  description: "Collect recent papers for selected CCF conferences/journals using arXiv, OpenReview, OpenAlex, and optionally Semantic Scholar, with actual source URLs and broad-search follow-up hints.",
   args: {
     topic: tool.schema.string().describe("Research topic or field."),
     domains: tool.schema.array(tool.schema.string()).optional().describe("Optional domain hints, e.g. ai, formal_methods."),
@@ -133,6 +133,7 @@ export const collect_venue_papers = tool({
     max_venues: tool.schema.number().optional().describe("Maximum venues to search, default 10."),
     max_results_per_venue: tool.schema.number().optional().describe("Provider results per venue, default 8."),
     max_total: tool.schema.number().optional().describe("Maximum papers returned after dedupe/filtering, default 60."),
+    include_arxiv: tool.schema.boolean().optional().describe("Query arXiv as a broad topic source, default true."),
     include_openreview: tool.schema.boolean().optional().describe("Query OpenReview venue APIs when available, default true."),
     include_openalex: tool.schema.boolean().optional().describe("Query OpenAlex works API, default true."),
     include_broad_openalex: tool.schema.boolean().optional().describe("Keep OpenAlex broad-search papers not actually published in the target venue, default true."),
@@ -468,12 +469,15 @@ export const save_artifact = tool({
 })
 
 export const watchlist = tool({
-  description: "Manage ResearchPilot watchlist or apply it to the latest saved arXiv search results.",
+  description: "Manage ResearchPilot watchlist, track scholar/group/institution homepages and recent papers, or apply watchlist to saved arXiv results.",
   args: {
-    operation: tool.schema.string().describe("One of: list, add, delete, rank_last_search, summarize_last_search."),
-    item: tool.schema.object({}).passthrough().optional().describe("Watchlist item for add: name, type, authors, institutions, keywords, notes."),
-    index: tool.schema.number().optional().describe("0-based watchlist index for delete."),
+    operation: tool.schema.string().describe("One of: list, add, delete, track, dismiss_paper, rank_last_search, summarize_last_search."),
+    item: tool.schema.object({}).passthrough().optional().describe("Watchlist item for add/track: name, type, authors, institutions, keywords, homepage_urls, notes."),
+    index: tool.schema.number().optional().describe("0-based watchlist index for delete, track, or dismiss_paper."),
+    paper_id: tool.schema.string().optional().describe("Paper id to dismiss from a tracked watchlist recommendation page."),
+    months: tool.schema.number().optional().describe("Tracking window in months, default 6."),
     topic: tool.schema.string().optional().describe("Optional topic for summarize_last_search."),
+    max_results: tool.schema.number().optional().describe("Max tracked papers to collect, default 25."),
     max_papers: tool.schema.number().optional().describe("Max matched papers for summary, default 8."),
     save: tool.schema.boolean().optional().describe("Save Markdown summary artifact, default true."),
   },

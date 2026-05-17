@@ -1,5 +1,6 @@
 from pathlib import Path
 from datetime import datetime
+import html as html_lib
 import json
 import re
 import sys
@@ -13,6 +14,7 @@ if str(PROJECT_ROOT) not in sys.path:
 
 from researchpilot.cards.comparison_table import build_comparison_table
 from researchpilot.cards.metadata_cards import CARD_FIELDS
+from researchpilot.cards.metadata_cards import metadata_paper_id
 from researchpilot.cards.metadata_cards import paper_card_from_metadata
 from researchpilot.agent_bridge import agent_bridge_status
 from researchpilot.agent_bridge import list_agent_tasks
@@ -26,10 +28,19 @@ from researchpilot.llm.openai_client import chat_completion
 from researchpilot.review.venue_report import deterministic_venue_report
 from researchpilot.review.review_diff import make_unified_diff
 from researchpilot.search.arxiv_search import download_arxiv_paper
+from researchpilot.search.arxiv_search import download_pdf_from_url
 from researchpilot.search.arxiv_search import search_arxiv_papers
 from researchpilot.storage.corpus_store import load_paper_cards_cache
 from researchpilot.storage.corpus_store import save_paper_cards_cache
 from researchpilot.watchlist.watchlist_ranker import rank_papers_by_watchlist
+from researchpilot.watchlist.recommendations import recommendation_to_watch_item
+from researchpilot.watchlist.recommendations import recommend_watchlist_items
+from researchpilot.watchlist.tracker import dismiss_watch_paper
+from researchpilot.watchlist.tracker import get_watch_item_tracking
+from researchpilot.watchlist.tracker import homepage_index_for_watch_item
+from researchpilot.watchlist.tracker import load_watchlist_tracking
+from researchpilot.watchlist.tracker import track_watch_item
+from researchpilot.watchlist.tracker import watch_item_key
 from researchpilot.watchlist.watchlist_store import add_watch_item
 from researchpilot.watchlist.watchlist_store import delete_watch_item
 from researchpilot.watchlist.watchlist_store import load_watchlist
@@ -47,22 +58,813 @@ st.set_page_config(
     page_title="ResearchPilot",
     layout="wide",
 )
-st.title("ResearchPilot")
+
+
+def _escape_html(value: object) -> str:
+    return html_lib.escape(str(value or ""), quote=True)
+
+
 st.html(
     """
     <style>
-    div[data-testid="stVerticalBlockBorderWrapper"] {
-        border-radius: 14px;
-        border-color: rgba(148, 163, 184, 0.34);
-        background: rgba(255, 255, 255, 0.72);
-        box-shadow: 0 18px 42px rgba(15, 23, 42, 0.08);
+    :root {
+        --rp-ink: #18202f;
+        --rp-muted: #697386;
+        --rp-soft: #f5f8fc;
+        --rp-panel: rgba(255, 255, 255, 0.82);
+        --rp-panel-strong: rgba(255, 255, 255, 0.94);
+        --rp-line: rgba(107, 123, 148, 0.18);
+        --rp-blue: #246bfe;
+        --rp-cyan: #00a7b5;
+        --rp-green: #1b8f68;
+        --rp-amber: #b47b12;
+        --rp-red: #c75353;
+        --rp-shadow: 0 24px 70px rgba(37, 48, 68, 0.12);
+        --rp-shadow-soft: 0 14px 34px rgba(37, 48, 68, 0.08);
+        --rp-radius: 18px;
     }
-    div[data-testid="stPopover"] button {
+
+    html, body, [class*="css"] {
+        font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont,
+            "SF Pro Display", "SF Pro Text", "PingFang SC", "Microsoft YaHei", sans-serif;
+        color: var(--rp-ink);
+    }
+
+    .stApp {
+        background:
+            linear-gradient(135deg, #f8fbff 0%, #f1f8fb 35%, #f7fbf4 68%, #fffaf2 100%);
+    }
+
+    .block-container {
+        max-width: 1480px;
+        padding-top: 1.25rem;
+        padding-bottom: 4rem;
+    }
+
+    header[data-testid="stHeader"] {
+        height: 0;
+        min-height: 0;
+        background: transparent;
+        pointer-events: none;
+    }
+
+    div[data-testid="stToolbar"] {
+        display: none;
+        pointer-events: none;
+    }
+
+    .rp-topbar {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        gap: 18px;
+        padding: 14px 18px;
+        margin: 0 0 18px;
+        border: 1px solid var(--rp-line);
+        border-radius: 22px;
+        background: rgba(255, 255, 255, 0.72);
+        box-shadow: var(--rp-shadow-soft);
+        backdrop-filter: blur(20px);
+    }
+
+    .rp-brand {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        min-width: 240px;
+    }
+
+    .rp-brand-mark {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        width: 42px;
+        height: 42px;
+        border-radius: 13px;
+        color: #ffffff;
+        font-weight: 820;
+        letter-spacing: 0;
+        background: linear-gradient(135deg, #246bfe, #00a7b5 56%, #1b8f68);
+        box-shadow: 0 12px 28px rgba(36, 107, 254, 0.22);
+    }
+
+    .rp-brand-title {
+        font-size: 18px;
+        font-weight: 800;
+        letter-spacing: 0;
+        line-height: 1.1;
+    }
+
+    .rp-brand-subtitle,
+    .rp-topbar-meta,
+    .rp-eyebrow,
+    .rp-muted {
+        color: var(--rp-muted);
+    }
+
+    .rp-brand-subtitle {
+        font-size: 12px;
+        margin-top: 4px;
+    }
+
+    .rp-topbar-meta {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        flex-wrap: wrap;
+        justify-content: flex-end;
+        font-size: 13px;
+    }
+
+    .rp-pill,
+    .rp-chip {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
         border-radius: 999px;
+        border: 1px solid var(--rp-line);
+        background: rgba(255, 255, 255, 0.72);
+        color: #364052;
+        font-size: 12px;
+        font-weight: 650;
+        line-height: 1;
+        white-space: nowrap;
+    }
+
+    .rp-pill {
+        padding: 8px 11px;
+    }
+
+    .rp-chip {
+        padding: 7px 10px;
+    }
+
+    .rp-chip-blue {
+        color: #154fc7;
+        border-color: rgba(36, 107, 254, 0.24);
+        background: rgba(36, 107, 254, 0.08);
+    }
+
+    .rp-chip-green {
+        color: #0d7554;
+        border-color: rgba(27, 143, 104, 0.24);
+        background: rgba(27, 143, 104, 0.08);
+    }
+
+    .rp-chip-amber {
+        color: #8a5b07;
+        border-color: rgba(180, 123, 18, 0.28);
+        background: rgba(180, 123, 18, 0.09);
+    }
+
+    .rp-hero {
+        position: relative;
+        overflow: hidden;
+        border-radius: 28px;
+        border: 1px solid rgba(106, 124, 152, 0.18);
+        background:
+            linear-gradient(120deg, rgba(255,255,255,0.96) 0%, rgba(247,251,255,0.9) 48%, rgba(239,249,245,0.92) 100%);
+        box-shadow: var(--rp-shadow);
+        padding: 34px;
+        min-height: 326px;
+    }
+
+    .rp-hero::after {
+        content: "";
+        position: absolute;
+        inset: auto -90px -120px 45%;
+        height: 260px;
+        background:
+            linear-gradient(135deg, rgba(36,107,254,0.08), rgba(0,167,181,0.12), rgba(27,143,104,0.10));
+        transform: rotate(-6deg);
+        border-radius: 48px;
+    }
+
+    .rp-hero-grid {
+        position: relative;
+        z-index: 1;
+        display: grid;
+        grid-template-columns: minmax(0, 1.18fr) minmax(320px, 0.82fr);
+        gap: 30px;
+        align-items: center;
+    }
+
+    .rp-eyebrow {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        flex-wrap: wrap;
+        margin-bottom: 18px;
+        font-size: 13px;
+        font-weight: 700;
+    }
+
+    .rp-hero h1 {
+        margin: 0;
+        max-width: 850px;
+        font-size: clamp(40px, 5vw, 66px);
+        line-height: 1.02;
+        letter-spacing: 0;
+        color: #121926;
+    }
+
+    .rp-hero-lead {
+        max-width: 790px;
+        margin: 20px 0 0;
+        color: #536174;
+        font-size: 17px;
+        line-height: 1.82;
+    }
+
+    .rp-search-shell {
+        margin-top: 26px;
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) auto;
+        gap: 10px;
+        max-width: 820px;
+        padding: 8px;
+        border: 1px solid rgba(36, 107, 254, 0.15);
+        border-radius: 18px;
+        background: rgba(255, 255, 255, 0.78);
+        box-shadow: 0 18px 38px rgba(36, 107, 254, 0.10);
+    }
+
+    .rp-search-text {
+        padding: 12px 14px;
+        color: #2f3b4f;
+        font-weight: 650;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+    }
+
+    .rp-search-action {
+        padding: 12px 15px;
+        border-radius: 13px;
+        color: #ffffff;
+        font-size: 13px;
+        font-weight: 760;
+        background: linear-gradient(135deg, #246bfe, #00a7b5);
+        white-space: nowrap;
+    }
+
+    .rp-intel-panel {
+        border: 1px solid rgba(107, 123, 148, 0.18);
+        border-radius: 24px;
+        background: rgba(255, 255, 255, 0.76);
+        box-shadow: var(--rp-shadow-soft);
+        backdrop-filter: blur(20px);
+        padding: 18px;
+    }
+
+    .rp-intel-header {
+        display: flex;
+        justify-content: space-between;
+        gap: 12px;
+        align-items: flex-start;
+        margin-bottom: 14px;
+    }
+
+    .rp-intel-title {
+        font-size: 16px;
+        font-weight: 800;
+    }
+
+    .rp-intel-row {
+        display: grid;
+        grid-template-columns: 70px minmax(0, 1fr);
+        gap: 12px;
+        align-items: start;
+        padding: 13px 0;
+        border-top: 1px solid rgba(107, 123, 148, 0.14);
+    }
+
+    .rp-intel-row strong {
+        display: block;
+        margin-bottom: 4px;
+        color: #202b3d;
+    }
+
+    .rp-intel-row span {
+        color: #667386;
+        font-size: 13px;
+        line-height: 1.55;
+    }
+
+    .rp-section-head {
+        margin: 28px 0 12px;
+    }
+
+    .rp-section-head h2 {
+        margin: 0;
+        font-size: 25px;
+        letter-spacing: 0;
+    }
+
+    .rp-section-head p {
+        margin: 8px 0 0;
+        color: var(--rp-muted);
+        line-height: 1.65;
+    }
+
+    .rp-metric-grid {
+        display: grid;
+        grid-template-columns: repeat(4, minmax(0, 1fr));
+        gap: 14px;
+        margin: 18px 0 8px;
+    }
+
+    .rp-metric-card,
+    .rp-feature-card,
+    .rp-data-card {
+        border: 1px solid var(--rp-line);
+        border-radius: 18px;
+        background: rgba(255, 255, 255, 0.76);
+        box-shadow: var(--rp-shadow-soft);
+        backdrop-filter: blur(18px);
+    }
+
+    .rp-metric-card {
+        padding: 18px;
+    }
+
+    .rp-metric-label {
+        color: var(--rp-muted);
+        font-size: 13px;
+        font-weight: 650;
+    }
+
+    .rp-metric-value {
+        margin-top: 8px;
+        font-size: 30px;
+        font-weight: 840;
+        letter-spacing: 0;
+        color: #142033;
+    }
+
+    .rp-metric-note {
+        margin-top: 8px;
+        color: #7a8596;
+        font-size: 12px;
+    }
+
+    .rp-feature-grid {
+        display: grid;
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+        gap: 16px;
+    }
+
+    .rp-feature-card {
+        min-height: 174px;
+        padding: 18px;
+        display: flex;
+        flex-direction: column;
+        justify-content: space-between;
+    }
+
+    .rp-feature-kicker {
+        color: #246bfe;
+        font-size: 12px;
+        font-weight: 800;
+        letter-spacing: 0;
+        text-transform: uppercase;
+    }
+
+    .rp-feature-card h3 {
+        margin: 9px 0 8px;
+        font-size: 20px;
+        letter-spacing: 0;
+    }
+
+    .rp-feature-card p {
+        margin: 0;
+        color: #5c687a;
+        line-height: 1.62;
+    }
+
+    .rp-feature-foot {
+        margin-top: 16px;
+        color: #3a4658;
+        font-size: 13px;
+        font-weight: 700;
+    }
+
+    .rp-data-grid {
+        display: grid;
+        grid-template-columns: repeat(4, minmax(0, 1fr));
+        gap: 12px;
+    }
+
+    .rp-data-card {
+        padding: 14px;
+    }
+
+    .rp-data-card strong {
+        display: block;
+        margin-bottom: 8px;
+    }
+
+    .rp-data-card code {
+        white-space: normal;
+        word-break: break-word;
+        color: #4d5b6f;
+        background: rgba(233, 239, 247, 0.72);
+        border-radius: 8px;
+        padding: 2px 5px;
+    }
+
+    .rp-flow-grid {
+        display: grid;
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+        gap: 12px;
+        margin: 14px 0 20px;
+    }
+
+    .rp-flow-step {
+        position: relative;
+        min-height: 92px;
+        padding: 15px 16px;
+        border: 1px solid rgba(107, 123, 148, 0.16);
+        border-radius: 18px;
+        background: rgba(255, 255, 255, 0.72);
+        box-shadow: 0 12px 30px rgba(37, 48, 68, 0.07);
+        backdrop-filter: blur(18px);
+    }
+
+    .rp-flow-step::before {
+        content: "";
+        position: absolute;
+        inset: 0 auto 0 0;
+        width: 4px;
+        border-radius: 18px 0 0 18px;
+        background: linear-gradient(180deg, #246bfe, #00a7b5, #1b8f68);
+    }
+
+    .rp-flow-index {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        width: 28px;
+        height: 28px;
+        margin-bottom: 8px;
+        border-radius: 999px;
+        color: #154fc7;
+        background: rgba(36, 107, 254, 0.10);
+        font-size: 12px;
+        font-weight: 820;
+    }
+
+    .rp-flow-title {
+        margin-bottom: 5px;
+        font-size: 15px;
+        font-weight: 820;
+        color: #172033;
+    }
+
+    .rp-flow-copy {
+        color: #607086;
+        font-size: 13px;
+        line-height: 1.58;
+    }
+
+    .rp-command-panel {
+        margin: 8px 0 18px;
+        padding: 1px;
+        border-radius: 20px;
+        background: linear-gradient(135deg, rgba(36, 107, 254, 0.22), rgba(0, 167, 181, 0.14), rgba(27, 143, 104, 0.18));
+    }
+
+    .rp-command-inner {
+        border-radius: 19px;
+        padding: 16px 18px;
+        background: rgba(255, 255, 255, 0.86);
+        box-shadow: var(--rp-shadow-soft);
+    }
+
+    .rp-command-title {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 12px;
+        margin-bottom: 8px;
+    }
+
+    .rp-command-title strong {
+        font-size: 16px;
+        color: #172033;
+    }
+
+    .rp-command-inner p {
+        margin: 0;
+        color: #607086;
+        line-height: 1.62;
+    }
+
+    .rp-inline-stats {
+        display: flex;
+        gap: 8px;
+        flex-wrap: wrap;
+        margin: 10px 0 18px;
+    }
+
+    .rp-inline-stat {
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+        min-height: 34px;
+        padding: 8px 11px;
+        border: 1px solid rgba(107, 123, 148, 0.16);
+        border-radius: 999px;
+        background: rgba(255, 255, 255, 0.74);
+        box-shadow: 0 8px 18px rgba(37, 48, 68, 0.05);
+        color: #405066;
+        font-size: 12px;
+        font-weight: 700;
+    }
+
+    .rp-inline-stat b {
+        color: #142033;
+        font-size: 13px;
+    }
+
+    .rp-window-bar {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 12px;
+        padding: 2px 0 10px;
+        border-bottom: 1px solid rgba(107, 123, 148, 0.14);
+        margin-bottom: 14px;
+    }
+
+    .rp-window-dots {
+        display: flex;
+        gap: 7px;
+    }
+
+    .rp-dot {
+        width: 10px;
+        height: 10px;
+        border-radius: 999px;
+        display: inline-flex;
+    }
+
+    .rp-dot-red { background: #ff6b6b; }
+    .rp-dot-amber { background: #f6c253; }
+    .rp-dot-green { background: #49c382; }
+
+    .rp-field-label {
+        display: inline-flex;
+        align-items: center;
+        gap: 7px;
+        margin: 10px 0 6px;
+        font-weight: 820;
+        color: #1d2838;
+    }
+
+    .rp-field-code {
+        padding: 2px 7px;
+        border-radius: 999px;
+        background: rgba(36, 107, 254, 0.08);
+        color: #246bfe;
+        font-size: 12px;
+        font-weight: 740;
+    }
+
+    .rp-card-preview-zh {
+        color: #536174;
+        line-height: 1.55;
+        margin-bottom: 6px;
+    }
+
+    .rp-card-preview-en {
+        color: #2f3b4f;
+        line-height: 1.58;
+    }
+
+    div[data-testid="stTabs"] div[data-baseweb="tab-list"] {
+        position: sticky;
+        top: 10px;
+        z-index: 20;
+        display: flex;
+        flex-wrap: wrap;
+        gap: 6px;
+        padding: 10px 10px 8px;
+        margin-bottom: 18px;
+        border: 1px solid rgba(107, 123, 148, 0.14);
+        border-radius: 18px;
+        background: rgba(255, 255, 255, 0.82);
+        box-shadow: var(--rp-shadow-soft);
+        backdrop-filter: blur(18px);
+        overflow: visible;
+        height: auto;
+    }
+
+    div[data-testid="stTabs"] button[role="tab"] {
+        flex: 0 1 auto;
+        min-height: 42px;
+        border-radius: 13px;
+        padding: 8px 12px;
+        color: #465366;
+        font-weight: 720;
+    }
+
+    div[data-testid="stTabs"] button[role="tab"][aria-selected="true"] {
+        color: #12305f;
+        background: rgba(36, 107, 254, 0.10);
+    }
+
+    div[data-testid="stTabs"] div[data-baseweb="tab-highlight"] {
+        display: none;
+    }
+
+    div[data-testid="stTabs"] button[aria-label="Scroll tabs left"],
+    div[data-testid="stTabs"] button[aria-label="Scroll tabs right"] {
+        display: none;
+    }
+
+    div[data-testid="stVerticalBlockBorderWrapper"] {
+        border-radius: 18px;
+        border-color: rgba(107, 123, 148, 0.20);
+        background: rgba(255, 255, 255, 0.78);
+        box-shadow: var(--rp-shadow-soft);
+        backdrop-filter: blur(18px);
+    }
+
+    div[data-testid="stPopover"] button,
+    div[data-testid="stButton"] button,
+    div[data-testid="stDownloadButton"] button,
+    div[data-testid="stFormSubmitButton"] button {
+        border-radius: 13px;
+        font-weight: 760;
+        border-color: rgba(107, 123, 148, 0.18);
+        box-shadow: 0 8px 20px rgba(37, 48, 68, 0.06);
+    }
+
+    div[data-testid="stMetric"] {
+        border: 1px solid rgba(107, 123, 148, 0.16);
+        border-radius: 16px;
+        padding: 12px 14px;
+        background: rgba(255, 255, 255, 0.68);
+    }
+
+    div[data-testid="stDataFrame"] {
+        border-radius: 16px;
+        overflow: hidden;
+        border: 1px solid rgba(107, 123, 148, 0.14);
+        box-shadow: var(--rp-shadow-soft);
+    }
+
+    textarea,
+    input,
+    div[data-baseweb="select"] > div {
+        border-radius: 13px !important;
+    }
+
+    div[data-testid="stTextInput"] label,
+    div[data-testid="stTextArea"] label,
+    div[data-testid="stSelectbox"] label,
+    div[data-testid="stSlider"] label,
+    div[data-testid="stCheckbox"] label,
+    div[data-testid="stFileUploader"] label,
+    div[data-testid="stMultiSelect"] label {
+        color: #2f3b4f;
+        font-weight: 720;
+    }
+
+    div[data-testid="stForm"] {
+        padding: 18px;
+        border: 1px solid rgba(107, 123, 148, 0.18);
+        border-radius: 20px;
+        background: rgba(255, 255, 255, 0.70);
+        box-shadow: var(--rp-shadow-soft);
+        backdrop-filter: blur(16px);
+    }
+
+    div[data-testid="stExpander"] {
+        border: 1px solid rgba(107, 123, 148, 0.16);
+        border-radius: 16px;
+        background: rgba(255, 255, 255, 0.68);
+        box-shadow: 0 10px 24px rgba(37, 48, 68, 0.05);
+        overflow: hidden;
+    }
+
+    div[data-testid="stAlert"] {
+        border-radius: 16px;
+        border-color: rgba(107, 123, 148, 0.16);
+        box-shadow: 0 8px 18px rgba(37, 48, 68, 0.04);
+    }
+
+    div[data-testid="stFileUploader"] section {
+        border-radius: 18px;
+        border-color: rgba(36, 107, 254, 0.20);
+        background: rgba(255, 255, 255, 0.72);
+    }
+
+    div[data-testid="stChatInput"] {
+        border-radius: 18px;
+        box-shadow: var(--rp-shadow-soft);
+    }
+
+    hr {
+        margin: 1.4rem 0;
+        border-color: rgba(107, 123, 148, 0.14);
+    }
+
+    h3 {
+        letter-spacing: 0;
+    }
+
+    .stChatMessage {
+        border-radius: 18px;
+        border: 1px solid rgba(107, 123, 148, 0.14);
+        background: rgba(255, 255, 255, 0.72);
+        box-shadow: var(--rp-shadow-soft);
+    }
+
+    @media (max-width: 1100px) {
+        .rp-hero-grid,
+        .rp-feature-grid,
+        .rp-flow-grid,
+        .rp-metric-grid,
+        .rp-data-grid {
+            grid-template-columns: 1fr 1fr;
+        }
+    }
+
+    @media (max-width: 760px) {
+        .block-container {
+            padding-left: 1rem;
+            padding-right: 1rem;
+        }
+        .rp-topbar,
+        .rp-topbar-meta {
+            align-items: flex-start;
+            justify-content: flex-start;
+        }
+        .rp-topbar,
+        .rp-hero-grid,
+        .rp-feature-grid,
+        .rp-flow-grid,
+        .rp-metric-grid,
+        .rp-data-grid,
+        .rp-search-shell {
+            grid-template-columns: 1fr;
+            flex-direction: column;
+        }
+        .rp-hero {
+            padding: 24px;
+            border-radius: 22px;
+        }
+        .rp-search-action {
+            text-align: center;
+        }
     }
     </style>
     """
 )
+
+
+def _render_app_shell() -> None:
+    status = agent_bridge_status()
+    codex_status = "Codex 可用" if status["codex_available"] else "Codex 未连接"
+    opencode_status = "OpenCode 可用" if status["opencode_available"] else "OpenCode 未连接"
+    st.html(
+        f"""
+        <div class="rp-topbar">
+            <div class="rp-brand">
+                <div class="rp-brand-mark">RP</div>
+                <div>
+                    <div class="rp-brand-title">ResearchPilot</div>
+                    <div class="rp-brand-subtitle">面向科研方向发现、论文卡片与本地 agent 协作的工作台</div>
+                </div>
+            </div>
+            <div class="rp-topbar-meta">
+                <span class="rp-pill">中文首页</span>
+                <span class="rp-pill">CCF Venue Discovery</span>
+                <span class="rp-pill">{_escape_html(codex_status)}</span>
+                <span class="rp-pill">{_escape_html(opencode_status)}</span>
+            </div>
+        </div>
+        """
+    )
+
+
+def _render_section_header(title: str, subtitle: str = "", kicker: str = "") -> None:
+    kicker_html = f'<div class="rp-eyebrow">{_escape_html(kicker)}</div>' if kicker else ""
+    subtitle_html = f"<p>{_escape_html(subtitle)}</p>" if subtitle else ""
+    st.html(
+        f"""
+        <div class="rp-section-head">
+            {kicker_html}
+            <h2>{_escape_html(title)}</h2>
+            {subtitle_html}
+        </div>
+        """
+    )
+
+
+_render_app_shell()
 
 if "pipeline" not in st.session_state:
     st.session_state["pipeline"] = ResearchPilotPipeline()
@@ -95,6 +897,11 @@ if "watchlist" not in st.session_state:
         st.session_state["watchlist"] = []
 if "watchlist_trend_summary" not in st.session_state:
     st.session_state["watchlist_trend_summary"] = ""
+if "watchlist_tracking" not in st.session_state:
+    try:
+        st.session_state["watchlist_tracking"] = load_watchlist_tracking()
+    except Exception:
+        st.session_state["watchlist_tracking"] = {}
 if "venue_plan" not in st.session_state:
     st.session_state["venue_plan"] = None
 if "venue_collection" not in st.session_state:
@@ -118,6 +925,7 @@ arxiv_topic: str = st.session_state["arxiv_topic"]
 research_ideas: str = st.session_state["research_ideas"]
 watchlist: list[dict] = st.session_state["watchlist"]
 watchlist_trend_summary: str = st.session_state["watchlist_trend_summary"]
+watchlist_tracking: dict[str, dict] = st.session_state["watchlist_tracking"]
 venue_plan: dict | None = st.session_state["venue_plan"]
 venue_collection: dict | None = st.session_state["venue_collection"]
 
@@ -130,6 +938,266 @@ def _arxiv_selection_key(paper: dict, rank: int) -> str:
 
 def _split_lines(text: str) -> list[str]:
     return [line.strip() for line in str(text).splitlines() if line.strip()]
+
+
+def _current_topic_hint() -> str:
+    collection = st.session_state.get("venue_collection")
+    if isinstance(collection, dict) and str(collection.get("topic", "")).strip():
+        return str(collection.get("topic", "")).strip()
+    for key in ["review_topic", "arxiv_topic", "research_ideas_topic"]:
+        value = str(st.session_state.get(key, "") or "").strip()
+        if value:
+            return value
+    return "形式化验证与大模型结合"
+
+
+def _render_metric_grid(metrics: list[tuple[str, object, str]]) -> None:
+    cards = []
+    for label, value, note in metrics:
+        cards.append(
+            f"""
+            <div class="rp-metric-card">
+                <div class="rp-metric-label">{_escape_html(label)}</div>
+                <div class="rp-metric-value">{_escape_html(value)}</div>
+                <div class="rp-metric-note">{_escape_html(note)}</div>
+            </div>
+            """
+        )
+    st.html(f'<div class="rp-metric-grid">{"".join(cards)}</div>')
+
+
+def _render_feature_grid(features: list[dict[str, str]]) -> None:
+    cards = []
+    for item in features:
+        chips = "".join(
+            f'<span class="rp-chip {chip.get("class", "")}">{_escape_html(chip.get("label", ""))}</span>'
+            for chip in item.get("chips", [])
+        )
+        cards.append(
+            f"""
+            <div class="rp-feature-card">
+                <div>
+                    <div class="rp-feature-kicker">{_escape_html(item.get("kicker", ""))}</div>
+                    <h3>{_escape_html(item.get("title", ""))}</h3>
+                    <p>{_escape_html(item.get("text", ""))}</p>
+                </div>
+                <div>
+                    <div style="display:flex;gap:7px;flex-wrap:wrap;margin-top:16px;">{chips}</div>
+                    <div class="rp-feature-foot">{_escape_html(item.get("foot", ""))}</div>
+                </div>
+            </div>
+            """
+        )
+    st.html(f'<div class="rp-feature-grid">{"".join(cards)}</div>')
+
+
+def _render_data_grid(items: list[tuple[str, str, str]]) -> None:
+    cards = []
+    for title, path, note in items:
+        cards.append(
+            f"""
+            <div class="rp-data-card">
+                <strong>{_escape_html(title)}</strong>
+                <code>{_escape_html(path)}</code>
+                <div class="rp-muted" style="margin-top:10px;font-size:12px;line-height:1.55;">{_escape_html(note)}</div>
+            </div>
+            """
+        )
+    st.html(f'<div class="rp-data-grid">{"".join(cards)}</div>')
+
+
+def _render_workflow_strip(steps: list[tuple[str, str]]) -> None:
+    cards = []
+    for idx, (title, copy) in enumerate(steps, start=1):
+        cards.append(
+            f"""
+            <div class="rp-flow-step">
+                <div class="rp-flow-index">{idx:02d}</div>
+                <div class="rp-flow-title">{_escape_html(title)}</div>
+                <div class="rp-flow-copy">{_escape_html(copy)}</div>
+            </div>
+            """
+        )
+    st.html(f'<div class="rp-flow-grid">{"".join(cards)}</div>')
+
+
+def _render_command_panel(
+    title: str,
+    body: str,
+    chips: list[str] | None = None,
+) -> None:
+    chips = chips or []
+    chip_html = "".join(
+        f'<span class="rp-chip rp-chip-blue">{_escape_html(chip)}</span>'
+        for chip in chips
+    )
+    st.html(
+        f"""
+        <div class="rp-command-panel">
+            <div class="rp-command-inner">
+                <div class="rp-command-title">
+                    <strong>{_escape_html(title)}</strong>
+                    <div style="display:flex;gap:7px;flex-wrap:wrap;justify-content:flex-end;">{chip_html}</div>
+                </div>
+                <p>{_escape_html(body)}</p>
+            </div>
+        </div>
+        """
+    )
+
+
+def _render_inline_stats(items: list[tuple[str, object]]) -> None:
+    stats = []
+    for label, value in items:
+        stats.append(
+            f"""
+            <span class="rp-inline-stat">
+                <span>{_escape_html(label)}</span>
+                <b>{_escape_html(value)}</b>
+            </span>
+            """
+        )
+    st.html(f'<div class="rp-inline-stats">{"".join(stats)}</div>')
+
+
+def _render_home() -> None:
+    cards_count = len(paper_cards)
+    ingested_count = len(pipeline.list_papers())
+    reports_count = len(list_workspace_reports(limit=50))
+    watch_count = len(st.session_state.get("watchlist", []))
+    status = agent_bridge_status()
+    task_count = len(list_agent_tasks(limit=20))
+    topic_hint = _current_topic_hint()
+    codex_badge = "Codex 可直接委托" if status["codex_available"] else "Codex CLI 未发现"
+    opencode_badge = "OpenCode 可直接委托" if status["opencode_available"] else "OpenCode CLI 未发现"
+
+    st.html(
+        f"""
+        <section class="rp-hero">
+            <div class="rp-hero-grid">
+                <div>
+                    <div class="rp-eyebrow">
+                        <span class="rp-chip rp-chip-blue">ResearchPilot · 本地科研工作台</span>
+                        <span class="rp-chip rp-chip-green">Agent-native generation</span>
+                        <span class="rp-chip rp-chip-amber">CCF / OpenReview / Scholar APIs</span>
+                    </div>
+                    <h1>从方向发现到可验证综述的科研情报工作台</h1>
+                    <p class="rp-hero-lead">
+                        以 topic 为入口规划 CCF 会议/期刊，聚合 arXiv、OpenReview、OpenAlex、Semantic Scholar 与本地文献，
+                        生成双语 paper cards、comparison table、调研报告，并把 Codex/OpenCode 接入网页端任务流。
+                    </p>
+                    <div class="rp-search-shell">
+                        <div class="rp-search-text">当前建议检索方向：{_escape_html(topic_hint)}</div>
+                        <div class="rp-search-action">前往 Research Discovery</div>
+                    </div>
+                </div>
+                <aside class="rp-intel-panel">
+                    <div class="rp-intel-header">
+                        <div>
+                            <div class="rp-intel-title">科研情报流</div>
+                            <div class="rp-muted" style="font-size:12px;margin-top:4px;">参考 AMiner 的报告、学者图谱与订阅式发现体验</div>
+                        </div>
+                        <span class="rp-chip rp-chip-blue">Live Workspace</span>
+                    </div>
+                    <div class="rp-intel-row">
+                        <span class="rp-chip">01</span>
+                        <div><strong>Topic → Venue Plan</strong><span>根据研究方向选择 AI、PL、FM、SE 等交叉 venue，并保留 Google Scholar 补查入口。</span></div>
+                    </div>
+                    <div class="rp-intel-row">
+                        <span class="rp-chip">02</span>
+                        <div><strong>Paper Cards → Report</strong><span>将论文元数据和本地 PDF 统一成可编辑卡片，再汇总成报告草稿。</span></div>
+                    </div>
+                    <div class="rp-intel-row">
+                        <span class="rp-chip">03</span>
+                        <div><strong>Watchlist → Scholar Graph</strong><span>把学者、课题组和机构加入关注流，形成后续推荐和追踪依据。</span></div>
+                    </div>
+                </aside>
+            </div>
+        </section>
+        """
+    )
+
+    _render_metric_grid(
+        [
+            ("Paper Cards", cards_count, "已缓存、可双语编辑"),
+            ("已入库论文", ingested_count, "可用于 RAG 和引用验证"),
+            ("Workspace 报告", reports_count, "已批准保存的调研资产"),
+            ("Bridge Tasks", task_count, "Codex / OpenCode 委托任务"),
+        ]
+    )
+
+    _render_section_header(
+        "功能导航",
+        "入口仍然使用顶部标签页；首页承担方向选择、能力导览和数据资产索引。",
+        "Application map",
+    )
+    _render_feature_grid(
+        [
+            {
+                "kicker": "Discovery",
+                "title": "Research Discovery",
+                "text": "按 topic 推断 CCF 会议/期刊，采集近期论文，生成调研报告与 metadata paper cards。",
+                "foot": "顶部标签：Research Discovery",
+                "chips": [{"label": "CCF"}, {"label": "OpenReview"}, {"label": "Semantic Scholar"}],
+            },
+            {
+                "kicker": "Cards",
+                "title": "Paper Cards",
+                "text": "查看、编辑和双语化论文卡片，字段逐项保存，适合后续 comparison table 和报告生成。",
+                "foot": "顶部标签：Paper Cards",
+                "chips": [{"label": "双语", "class": "rp-chip-green"}, {"label": "可编辑"}],
+            },
+            {
+                "kicker": "Workspace",
+                "title": "Workspace Chat",
+                "text": "读取 paper cards、入库论文、watchlist 和报告，支持比较、问答、报告预览与批准保存。",
+                "foot": "顶部标签：Workspace Chat",
+                "chips": [{"label": "Codex", "class": "rp-chip-blue"}, {"label": "OpenCode"}],
+            },
+            {
+                "kicker": "Review",
+                "title": "Literature Review",
+                "text": "基于 paper cards 生成综述，并做 claim-level citation verification 与保守改写。",
+                "foot": "顶部标签：Literature Review",
+                "chips": [{"label": "Citation check", "class": "rp-chip-amber"}],
+            },
+            {
+                "kicker": "People",
+                "title": "Watchlist",
+                "text": "管理学者、课题组、机构和关键词；推荐卡片可一键加入关注流。",
+                "foot": "顶部标签：Watchlist",
+                "chips": [{"label": "学者"}, {"label": "课题组"}, {"label": "机构"}],
+            },
+            {
+                "kicker": "Library",
+                "title": "Current Library",
+                "text": "快速核对已入库论文、缓存 paper cards、workspace 报告和当前数据状态。",
+                "foot": "顶部标签：Current Library",
+                "chips": [{"label": "Local-first", "class": "rp-chip-green"}],
+            },
+        ]
+    )
+
+    _render_section_header(
+        "数据模块",
+        "这些文件和目录是网页端与本地 agent 端对齐的共享状态。",
+        "Workspace assets",
+    )
+    _render_data_grid(
+        [
+            ("Paper cards", "data/outputs/paper_cards_cache.json", "双语卡片、字段编辑和 comparison table 的主缓存。"),
+            ("Venue collection", "data/agent_state/last_venue_collection.json", "最近一次跨 venue / 学术搜索采集结果。"),
+            ("Watchlist tracking", "data/outputs/watchlist_tracking.json", "学者/课题组/机构主页索引、近期论文和已忽略推荐。"),
+            ("Workspace reports", "data/outputs/workspace/", "用户批准保存后的报告和对话产物。"),
+            ("Agent bridge tasks", "data/outputs/agent_bridge/tasks/", "网页端委托 Codex/OpenCode 的任务队列。"),
+        ]
+    )
+
+    _render_section_header(
+        "本地 Agent 生成通道",
+        f"{codex_badge} · {opencode_badge} · 任务队列：{status['tasks_dir']}",
+        "Agent bridge",
+    )
 
 
 def _split_csv_or_lines(text: str) -> list[str]:
@@ -172,8 +1240,11 @@ def _extract_json_object(text: str) -> dict:
         start = raw.find("{")
         end = raw.rfind("}")
         if start >= 0 and end > start:
-            parsed = json.loads(raw[start : end + 1])
-            return parsed if isinstance(parsed, dict) else {}
+            try:
+                parsed = json.loads(raw[start : end + 1])
+                return parsed if isinstance(parsed, dict) else {}
+            except Exception:
+                return {}
     return {}
 
 
@@ -383,11 +1454,33 @@ def _render_paper_card(card: dict, card_key: str) -> None:
 
     zh = card.get("zh", {}) if isinstance(card.get("zh"), dict) else {}
     with st.container(border=True):
+        st.html(
+            """
+            <div class="rp-window-bar">
+                <div class="rp-window-dots">
+                    <span class="rp-dot rp-dot-red"></span>
+                    <span class="rp-dot rp-dot-amber"></span>
+                    <span class="rp-dot rp-dot-green"></span>
+                </div>
+                <span class="rp-chip rp-chip-blue">Paper Card</span>
+            </div>
+            """
+        )
         title_col, action_col = st.columns([0.78, 0.22], vertical_alignment="top")
         with title_col:
-            st.markdown(f"### {title}")
-            if chips:
-                st.caption(" · ".join(chips))
+            chip_html = "".join(
+                f'<span class="rp-chip">{_escape_html(chip)}</span>' for chip in chips[:8]
+            )
+            st.html(
+                f"""
+                <div>
+                    <h2 style="margin:0 0 10px;font-size:25px;line-height:1.25;letter-spacing:0;color:#141d2b;">
+                        {_escape_html(title)}
+                    </h2>
+                    <div style="display:flex;gap:7px;flex-wrap:wrap;margin-bottom:6px;">{chip_html}</div>
+                </div>
+                """
+            )
         with action_col:
             with st.popover("Edit Title", use_container_width=True):
                 title_value = st.text_input(
@@ -422,9 +1515,16 @@ def _render_paper_card(card: dict, card_key: str) -> None:
                 continue
 
             with field_columns[idx % 2]:
-                st.markdown(f"**{FIELD_LABELS_ZH.get(field, field)}**  `/{field}`")
-                st.caption(f"中文: {_card_preview(zh_text, 120)}")
-                st.write(_card_preview(en_text, 220))
+                st.html(
+                    f"""
+                    <div class="rp-field-label">
+                        <span>{_escape_html(FIELD_LABELS_ZH.get(field, field))}</span>
+                        <span class="rp-field-code">/{_escape_html(field)}</span>
+                    </div>
+                    <div class="rp-card-preview-zh">{_escape_html(_card_preview(zh_text, 140))}</div>
+                    <div class="rp-card-preview-en">{_escape_html(_card_preview(en_text, 240))}</div>
+                    """
+                )
                 with st.popover(f"Edit {FIELD_LABELS_ZH.get(field, field)}", use_container_width=True):
                     zh_value = st.text_area(
                         "中文",
@@ -604,9 +1704,155 @@ def _workspace_chat_answer(
     return chat_completion(messages=messages, temperature=0.2)
 
 
-tab_search, tab_discovery, tab_watchlist, tab_upload, tab_ask, tab_cards, tab_review, tab_ideas, tab_workspace_chat, tab_library = st.tabs(
+def _should_track_watch_item(item: dict) -> bool:
+    item_type = str(item.get("type", "") or "").strip()
+    return item_type in {"research_group", "professor", "institution"}
+
+
+def _refresh_watch_item_tracking(
+    item: dict,
+    *,
+    months: int = 6,
+    max_results: int = 25,
+) -> dict:
+    result = track_watch_item(item, months=months, max_results=max_results)
+    st.session_state["watchlist_tracking"] = load_watchlist_tracking()
+    return result
+
+
+def _add_tracking_paper_to_library(
+    paper: dict,
+    item: dict,
+    *,
+    download_and_ingest: bool = False,
+) -> tuple[str, str | None]:
+    card = paper_card_from_metadata(paper, topic=str(item.get("name", "")))
+    paper_id = str(card["paper_id"])
+    paper_cards[paper_id] = card
+    save_paper_cards_cache(paper_cards)
+    st.session_state["paper_cards"] = paper_cards
+
+    ingested_id: str | None = None
+    if download_and_ingest:
+        pdf_url = str(paper.get("pdf_url", "") or "").strip()
+        if not pdf_url:
+            raise RuntimeError("This paper does not expose a PDF URL.")
+        downloaded_path = download_pdf_from_url(pdf_url, output_dir="data/uploads")
+        chunks = pipeline.ingest_pdf(downloaded_path)
+        ingested_id = Path(downloaded_path).stem
+        if chunks and ingested_id in paper_cards:
+            del paper_cards[ingested_id]
+            st.session_state["paper_cards"] = paper_cards
+            save_paper_cards_cache(paper_cards)
+    return paper_id, ingested_id
+
+
+def _render_homepage_index(index_rows: list[dict]) -> None:
+    if not index_rows:
+        st.info("暂无主页索引。")
+        return
+    for row in index_rows:
+        if not isinstance(row, dict):
+            continue
+        label = str(row.get("label", "Homepage") or "Homepage")
+        kind = str(row.get("kind", "") or "")
+        url = str(row.get("url", "") or "")
+        if url:
+            st.markdown(f"- [{label}]({url}) `{kind}`")
+
+
+def _render_tracking_papers(item: dict, tracking: dict, idx: int) -> None:
+    dismissed = set(map(str, tracking.get("dismissed_paper_ids", []) or []))
+    papers = [paper for paper in tracking.get("papers", []) or [] if isinstance(paper, dict)]
+    visible_papers = [
+        paper
+        for paper in papers
+        if str(paper.get("paper_id") or metadata_paper_id(paper)) not in dismissed
+    ]
+    st.caption(
+        f"tracked_at={tracking.get('tracked_at', 'never')} · "
+        f"cutoff={tracking.get('cutoff_date', '')} · "
+        f"visible={len(visible_papers)} / total={len(papers)}"
+    )
+    warnings = tracking.get("warnings", []) if isinstance(tracking.get("warnings"), list) else []
+    if warnings:
+        with st.expander("Tracking warnings"):
+            for warning in warnings:
+                st.warning(str(warning))
+
+    with st.expander("主页 / 学术索引", expanded=True):
+        _render_homepage_index(tracking.get("homepage_index", []) or homepage_index_for_watch_item(item))
+
+    download_and_ingest = st.checkbox(
+        "加入时如果有 PDF URL，同时下载并 ingest",
+        value=False,
+        key=f"watch_track_ingest_{idx}_{watch_item_key(item)}",
+    )
+    if not visible_papers:
+        st.info("当前没有可展示的新论文；可能都被忽略，或 API 没有返回近 6 个月结果。")
+        return
+
+    for paper_idx, paper in enumerate(visible_papers, start=1):
+        paper_id = str(paper.get("paper_id") or metadata_paper_id(paper))
+        title = str(paper.get("title", paper_id))
+        with st.container(border=True):
+            st.markdown(f"**{paper_idx}. {title}**")
+            st.caption(
+                f"{paper.get('source', '')} · {paper.get('publication_date') or paper.get('year', '')} · "
+                f"{paper.get('venue', '')} · id={paper_id}"
+            )
+            authors = paper.get("authors", []) or []
+            if authors:
+                st.markdown(f"**authors**: {', '.join(map(str, authors[:8]))}")
+            reasons = paper.get("watch_match_reasons", []) or []
+            if reasons:
+                st.markdown(f"**watch match**: {', '.join(map(str, reasons[:8]))}")
+            abstract = str(paper.get("abstract", "") or "").strip()
+            if abstract:
+                st.markdown(abstract[:900] + ("..." if len(abstract) > 900 else ""))
+            link_cols = st.columns([1, 1, 1])
+            source_url = str(paper.get("source_url", "") or "")
+            pdf_url = str(paper.get("pdf_url", "") or "")
+            if source_url:
+                link_cols[0].markdown(f"[source]({source_url})")
+            if pdf_url:
+                link_cols[1].markdown(f"[pdf]({pdf_url})")
+            if str(paper_id) in paper_cards:
+                link_cols[2].success("card cached")
+
+            action_cols = st.columns(2)
+            if action_cols[0].button(
+                "加入 Library + 生成 Card",
+                key=f"watch_track_add_card_{idx}_{paper_idx}_{_safe_widget_key(paper_id)}",
+                width="stretch",
+            ):
+                try:
+                    card_id, ingested_id = _add_tracking_paper_to_library(
+                        paper,
+                        item,
+                        download_and_ingest=download_and_ingest,
+                    )
+                    message = f"已生成 paper card: {card_id}"
+                    if ingested_id:
+                        message += f"；已入库 PDF: {ingested_id}"
+                    st.success(message)
+                    st.rerun()
+                except Exception as exc:
+                    st.error(f"加入失败：{exc}")
+            if action_cols[1].button(
+                "不感兴趣，移出推荐",
+                key=f"watch_track_dismiss_{idx}_{paper_idx}_{_safe_widget_key(paper_id)}",
+                width="stretch",
+            ):
+                dismiss_watch_paper(item, paper_id)
+                st.session_state["watchlist_tracking"] = load_watchlist_tracking()
+                st.success("已从该关注对象的推荐页隐藏。")
+                st.rerun()
+
+
+tab_home, tab_discovery, tab_watchlist, tab_upload, tab_ask, tab_cards, tab_review, tab_ideas, tab_workspace_chat, tab_library = st.tabs(
     [
-        "Search Papers",
+        "首页",
         "Research Discovery",
         "Watchlist",
         "Upload PDFs",
@@ -619,10 +1865,39 @@ tab_search, tab_discovery, tab_watchlist, tab_upload, tab_ask, tab_cards, tab_re
     ]
 )
 
-with tab_search:
+with tab_home:
+    _render_home()
+
+
+def _render_arxiv_search_panel() -> None:
+    _render_section_header(
+        "arXiv-only 检索",
+        "只调用 arXiv 结果，适合快速查新、勾选下载和 PDF 入库。",
+        "Discovery mode",
+    )
+    _render_workflow_strip(
+        [
+            ("输入方向", "用 topic、排序方式和 watchlist 优先级限定快速检索范围。"),
+            ("筛选论文", "结果按相关性和关注对象匹配展示，可逐篇查看摘要与命中原因。"),
+            ("下载入库", "选中 PDF 后下载到本地，并可自动进入语料库用于后续分析。"),
+        ]
+    )
+    _render_inline_stats(
+        [
+            ("当前结果", len(st.session_state.get("arxiv_results", []))),
+            ("已入库", len(pipeline.list_papers())),
+            ("Watchlist", len(st.session_state.get("watchlist", []))),
+        ]
+    )
+    _render_command_panel(
+        "只看 arXiv",
+        "开启顶部 arXiv-only 开关时，仅返回 arXiv 结果；关闭后使用会议、期刊和学术搜索聚合配置。",
+        ["arXiv", "watchlist ranking", "PDF ingest"],
+    )
+    current_arxiv_results = st.session_state.get("arxiv_results", [])
     search_topic_input = st.text_input(
         "Research topic",
-        value=arxiv_topic,
+        value=st.session_state.get("arxiv_topic", ""),
         key="arxiv_topic_input",
     )
     arxiv_max_results = st.slider(
@@ -671,7 +1946,7 @@ with tab_search:
 
                 st.session_state["arxiv_results"] = ranked_results
                 st.session_state["arxiv_topic"] = topic
-                arxiv_results = ranked_results
+                current_arxiv_results = ranked_results
                 if ranked_results:
                     st.success(f"Found {len(ranked_results)} arXiv papers.")
                 else:
@@ -679,11 +1954,11 @@ with tab_search:
             except Exception as exc:
                 st.error(f"Search failed: {exc}")
 
-    if arxiv_results:
+    if current_arxiv_results:
         st.caption(f'Latest topic: "{st.session_state.get("arxiv_topic", "")}"')
         st.subheader("Search Results")
 
-        for rank, paper in enumerate(arxiv_results, start=1):
+        for rank, paper in enumerate(current_arxiv_results, start=1):
             paper_title = str(paper.get("title", ""))
             watch_score = float(paper.get("watchlist_score", 0.0))
             if watch_score > 0:
@@ -727,7 +2002,7 @@ with tab_search:
             key="download_selected_arxiv_papers",
         ):
             selected_papers: list[dict] = []
-            for rank, paper in enumerate(arxiv_results, start=1):
+            for rank, paper in enumerate(current_arxiv_results, start=1):
                 if st.session_state.get(_arxiv_selection_key(paper, rank), False):
                     selected_papers.append(paper)
 
@@ -755,8 +2030,32 @@ with tab_search:
                     except Exception as exc:
                         st.error(f"{paper_title}: download/ingest failed. {exc}")
 
-with tab_discovery:
-    st.subheader("Topic-based Conference / Journal Discovery")
+
+def _render_default_research_discovery() -> None:
+    _render_section_header(
+        "科研方向会议/期刊论文搜集",
+        "从研究方向出发规划 CCF venue，合并 arXiv、OpenReview、OpenAlex、Semantic Scholar 与补查链接，形成可保存的 collection。",
+        "Default discovery",
+    )
+    _render_workflow_strip(
+        [
+            ("规划 venue", "基于 topic、领域提示和强制 venue 生成 CCF 会议/期刊候选。"),
+            ("聚合论文", "从 arXiv、OpenReview、OpenAlex、Semantic Scholar 等来源采集并按相关性过滤。"),
+            ("生成资产", "把 collection 转成 metadata cards、调研报告和可保存 workspace 文档。"),
+        ]
+    )
+    venue_plan = st.session_state.get("venue_plan")
+    venue_collection = st.session_state.get("venue_collection")
+    current_collection_count = 0
+    if isinstance(st.session_state.get("venue_collection"), dict):
+        current_collection_count = int(st.session_state["venue_collection"].get("paper_count", 0) or 0)
+    _render_inline_stats(
+        [
+            ("已规划 venue", len((venue_plan or {}).get("venues", [])) if isinstance(venue_plan, dict) else 0),
+            ("已采集论文", current_collection_count),
+            ("缓存 cards", len(paper_cards)),
+        ]
+    )
     current_year = datetime.now().year
     default_topic = (
         st.session_state.get("venue_collection", {}) or {}
@@ -796,13 +2095,14 @@ with tab_discovery:
 
     col_a, col_b, col_c = st.columns(3)
     with col_a:
+        include_arxiv = st.checkbox("arXiv", value=True, key="venue_include_arxiv")
         include_journals = st.checkbox("Include journals", value=True, key="venue_include_journals")
-        include_openreview = st.checkbox("OpenReview", value=True, key="venue_include_openreview")
     with col_b:
+        include_openreview = st.checkbox("OpenReview", value=True, key="venue_include_openreview")
         include_openalex = st.checkbox("OpenAlex", value=True, key="venue_include_openalex")
-        include_broad_openalex = st.checkbox("Keep broad OpenAlex hits", value=True, key="venue_include_broad_openalex")
     with col_c:
         include_semantic_scholar = st.checkbox("Semantic Scholar", value=True, key="venue_include_semantic_scholar")
+        include_broad_openalex = st.checkbox("Keep broad OpenAlex hits", value=True, key="venue_include_broad_openalex")
         include_broad_semantic_scholar = st.checkbox(
             "Keep broad Semantic Scholar hits",
             value=True,
@@ -855,7 +2155,7 @@ with tab_discovery:
             st.warning("Please enter at least one valid year.")
         else:
             try:
-                with st.spinner("Collecting papers from venue sources and academic search APIs..."):
+                with st.spinner("Collecting papers from arXiv, venue sources and academic search APIs..."):
                     collection = collect_venue_papers(
                         topic=topic,
                         domains=_split_csv_or_lines(domain_hints),
@@ -866,6 +2166,7 @@ with tab_discovery:
                         max_venues=max_venues,
                         max_results_per_venue=max_results_per_venue,
                         max_total=max_total,
+                        include_arxiv=include_arxiv,
                         include_openreview=include_openreview,
                         include_openalex=include_openalex,
                         include_broad_openalex=include_broad_openalex,
@@ -1053,7 +2354,111 @@ with tab_discovery:
             key="download_venue_report_md",
         )
 
+
+with tab_discovery:
+    _render_section_header(
+        "Research Discovery",
+        "统一 topic 入口；开启 arXiv-only 时只看 arXiv，关闭后使用默认搜索配置聚合会议、期刊、arXiv、OpenReview、OpenAlex 与 Semantic Scholar。",
+        "Paper discovery",
+    )
+    arxiv_only_mode = st.toggle(
+        "只看 arXiv 结果",
+        value=False,
+        key="research_discovery_arxiv_only",
+        help="开启：只搜索 arXiv；关闭：按默认配置从相关会议/期刊和多个学术来源聚合结果。",
+    )
+    if arxiv_only_mode:
+        _render_arxiv_search_panel()
+    else:
+        _render_default_research_discovery()
+
+
 with tab_watchlist:
+    _render_section_header(
+        "相关学者与课题组推荐",
+        "结合当前 topic、最近 collection 和已有 paper cards，推荐可加入 watchlist 的学者、课题组与机构。",
+        "Scholar graph",
+    )
+    _render_workflow_strip(
+        [
+            ("推荐对象", "从 topic、collection 作者和内置专家图谱生成候选学者/课题组。"),
+            ("加入关注", "一键加入 watchlist，后续搜索和报告会优先考虑这些对象。"),
+            ("观察趋势", "基于搜索结果汇总关注对象近期方向和论文动向。"),
+        ]
+    )
+    _render_inline_stats(
+        [
+            ("当前关注", len(watchlist)),
+            ("缓存 cards", len(paper_cards)),
+            ("最新 topic", _current_topic_hint()),
+        ]
+    )
+    recommendation_topic = st.text_input(
+        "推荐依据 topic",
+        value=_current_topic_hint(),
+        key="watchlist_recommendation_topic",
+    )
+    recommendations = recommend_watchlist_items(
+        topic=recommendation_topic,
+        collection=st.session_state.get("venue_collection"),
+        paper_cards=paper_cards,
+        watchlist=st.session_state.get("watchlist", []),
+        limit=6,
+    )
+    if not recommendations:
+        st.info("暂无新推荐；可以先在 Research Discovery 采集一个方向的论文，或输入更具体的推荐 topic。")
+    else:
+        rec_cols = st.columns(3)
+        for idx, rec in enumerate(recommendations):
+            with rec_cols[idx % 3]:
+                with st.container(border=True):
+                    institution_text = " / ".join(map(str, rec.get("institutions", [])[:3]))
+                    author_text = " / ".join(map(str, rec.get("authors", [])[:4]))
+                    keyword_html = "".join(
+                        f'<span class="rp-chip">{_escape_html(keyword)}</span>'
+                        for keyword in rec.get("keywords", [])[:6]
+                    )
+                    st.html(
+                        f"""
+                        <div class="rp-window-bar" style="padding-bottom:8px;margin-bottom:12px;">
+                            <div class="rp-window-dots">
+                                <span class="rp-dot rp-dot-red"></span>
+                                <span class="rp-dot rp-dot-amber"></span>
+                                <span class="rp-dot rp-dot-green"></span>
+                            </div>
+                            <span class="rp-chip rp-chip-green">score={float(rec.get('score', 0.0)):.1f}</span>
+                        </div>
+                        <div>
+                            <div class="rp-feature-kicker">{_escape_html(rec.get("type", "custom"))} · {_escape_html(rec.get("source", ""))}</div>
+                            <h3 style="margin:8px 0 10px;font-size:20px;line-height:1.25;letter-spacing:0;">{_escape_html(rec.get("name", ""))}</h3>
+                            <p style="margin:0;color:#5c687a;line-height:1.6;">{_escape_html(rec.get("reason", ""))}</p>
+                            <div style="margin-top:12px;color:#536174;font-size:13px;line-height:1.55;">
+                                <strong>机构</strong>：{_escape_html(institution_text or "未记录")}<br>
+                                <strong>代表学者</strong>：{_escape_html(author_text or "未记录")}
+                            </div>
+                            <div style="display:flex;gap:7px;flex-wrap:wrap;margin-top:12px;">{keyword_html}</div>
+                        </div>
+                        """
+                    )
+                    if st.button(
+                        "加入 Watchlist",
+                        key=f"add_recommended_watch_{idx}_{_safe_widget_key(str(rec.get('name', '')))}",
+                        width="stretch",
+                    ):
+                        try:
+                            new_watch_item = recommendation_to_watch_item(rec)
+                            updated_watchlist = add_watch_item(new_watch_item)
+                            st.session_state["watchlist"] = updated_watchlist
+                            watchlist = updated_watchlist
+                            if _should_track_watch_item(new_watch_item):
+                                with st.spinner("首次追踪主页索引与近 6 个月论文..."):
+                                    _refresh_watch_item_tracking(updated_watchlist[-1])
+                            st.success(f"Added watch item: {rec.get('name', '')}")
+                            st.rerun()
+                        except Exception as exc:
+                            st.error(f"Failed to add recommendation: {exc}")
+
+    st.divider()
     st.subheader("Add Watch Item")
     with st.form("watchlist_add_form", clear_on_submit=False):
         watch_name = st.text_input("name")
@@ -1080,6 +2485,10 @@ with tab_watchlist:
             "keywords (one per line)",
             placeholder="STORM\nRAG\nknowledge curation",
         )
+        watch_homepage_urls = st.text_area(
+            "homepage/profile URLs (one per line, optional)",
+            placeholder="https://example.edu/lab\nhttps://scholar.google.com/citations?...",
+        )
         watch_notes = st.text_area("notes")
         add_submitted = st.form_submit_button(
             "Add to Watchlist",
@@ -1095,17 +2504,23 @@ with tab_watchlist:
                     "authors": _split_lines(watch_authors),
                     "institutions": _split_lines(watch_institutions),
                     "keywords": _split_lines(watch_keywords),
+                    "homepage_urls": _split_lines(watch_homepage_urls),
                     "notes": watch_notes,
                 }
             )
             st.session_state["watchlist"] = updated_watchlist
             watchlist = updated_watchlist
+            new_watch_item = updated_watchlist[-1]
+            if _should_track_watch_item(new_watch_item):
+                with st.spinner("首次追踪主页索引与近 6 个月论文..."):
+                    _refresh_watch_item_tracking(new_watch_item)
             st.success(f"Added watch item: {watch_name.strip()}")
         except Exception as exc:
             st.error(f"Failed to add watch item: {exc}")
 
     st.divider()
     st.subheader("Current Watchlist")
+    st.session_state["watchlist_tracking"] = load_watchlist_tracking()
     if not watchlist:
         st.info("暂无关注对象。")
     else:
@@ -1118,7 +2533,42 @@ with tab_watchlist:
                 st.markdown(f"**authors**: {item.get('authors', [])}")
                 st.markdown(f"**institutions**: {item.get('institutions', [])}")
                 st.markdown(f"**keywords**: {item.get('keywords', [])}")
+                st.markdown(f"**homepage_urls**: {item.get('homepage_urls', [])}")
                 st.markdown(f"**notes**: {item.get('notes', '')}")
+                if _should_track_watch_item(item):
+                    st.divider()
+                    st.markdown("#### 主页索引与近 6 个月论文")
+                    track_cols = st.columns([1, 1, 2])
+                    tracking = (
+                        st.session_state.get("watchlist_tracking", {}).get(watch_item_key(item))
+                        or get_watch_item_tracking(item)
+                    )
+                    if track_cols[0].button(
+                        "追踪近 6 个月论文",
+                        key=f"watchlist_track_{idx}_{_safe_widget_key(item_name)}",
+                        width="stretch",
+                    ):
+                        try:
+                            with st.spinner("正在检索主页索引与近 6 个月论文..."):
+                                tracking = _refresh_watch_item_tracking(
+                                    item,
+                                    months=6,
+                                    max_results=25,
+                                )
+                            st.success(f"追踪完成：发现 {tracking.get('paper_count', 0)} 篇候选论文。")
+                        except Exception as exc:
+                            st.error(f"追踪失败：{exc}")
+                    if tracking:
+                        track_cols[1].caption(f"last tracked: {tracking.get('tracked_at', '')}")
+                        _render_tracking_papers(item, tracking, idx)
+                    else:
+                        track_cols[1].caption("尚未追踪")
+                        with st.expander("主页 / 学术索引", expanded=True):
+                            _render_homepage_index(homepage_index_for_watch_item(item))
+                        st.info("新加入的课题组/学者/机构会自动触发一次追踪；已有关注对象可点击上方按钮手动追踪。")
+                else:
+                    with st.expander("主页 / 学术索引"):
+                        _render_homepage_index(homepage_index_for_watch_item(item))
                 if st.button(
                     "Delete",
                     key=f"watchlist_delete_{idx}_{item_name}",
@@ -1134,8 +2584,21 @@ with tab_watchlist:
 
     st.divider()
     st.subheader("Watchlist Trend Summary")
-    if not st.session_state.get("arxiv_results"):
-        st.info("请先去 Search Papers 搜索。")
+    trend_papers = list(st.session_state.get("arxiv_results") or [])
+    trend_topic = str(st.session_state.get("arxiv_topic", "") or "").strip()
+    if not trend_papers and isinstance(st.session_state.get("venue_collection"), dict):
+        trend_collection = st.session_state["venue_collection"]
+        trend_topic = str(trend_collection.get("topic", "") or trend_topic).strip()
+        for paper in trend_collection.get("papers", []) or []:
+            if isinstance(paper, dict):
+                trend_papers.append(
+                    {
+                        **paper,
+                        "summary": paper.get("summary") or paper.get("abstract", ""),
+                    }
+                )
+    if not trend_papers:
+        st.info("请先在 Research Discovery 中搜索或采集论文。")
     else:
         if st.button(
             "Summarize Watchlist Trends",
@@ -1144,9 +2607,9 @@ with tab_watchlist:
         ):
             try:
                 summary = summarize_watchlist_trends(
-                    papers=st.session_state["arxiv_results"],
+                    papers=trend_papers,
                     watchlist=st.session_state.get("watchlist", []),
-                    topic=st.session_state.get("arxiv_topic"),
+                    topic=trend_topic,
                 )
                 st.session_state["watchlist_trend_summary"] = summary
                 watchlist_trend_summary = summary
@@ -1166,6 +2629,25 @@ with tab_watchlist:
             )
 
 with tab_upload:
+    _render_section_header(
+        "上传与解析本地 PDF",
+        "将已有论文放入本地语料库，用于问答、paper card 生成、综述和引用验证。",
+        "Local library",
+    )
+    _render_workflow_strip(
+        [
+            ("选择 PDF", "上传一个或多个论文文件，文件会保存在本地 workspace。"),
+            ("解析切块", "提取文本、页码和 chunks，写入检索索引。"),
+            ("进入分析", "入库后可生成 paper card、RAG 问答和综述验证。"),
+        ]
+    )
+    _render_inline_stats(
+        [
+            ("上传目录", "data/uploads"),
+            ("已入库", len(pipeline.list_papers())),
+            ("缓存 cards", len(paper_cards)),
+        ]
+    )
     st.caption("Uploaded files are saved to: ./data/uploads")
     uploaded_files = st.file_uploader(
         "Select one or more PDF files",
@@ -1193,7 +2675,26 @@ with tab_upload:
                     st.error(f"{uploaded_file.name}: ingest failed. {exc}")
 
 with tab_ask:
+    _render_section_header(
+        "基于已入库论文问答",
+        "从本地 PDF chunks 中检索证据，再回答问题并展示证据片段。",
+        "Evidence QA",
+    )
+    _render_workflow_strip(
+        [
+            ("提出问题", "针对已入库论文输入具体问题或比较请求。"),
+            ("检索证据", "从本地 chunks 中按 top-k 找到相关片段并保留来源。"),
+            ("生成回答", "输出答案并展示证据，便于核对和继续追问。"),
+        ]
+    )
     papers = pipeline.list_papers()
+    _render_inline_stats(
+        [
+            ("已入库", len(papers)),
+            ("默认证据", "top-k 8"),
+            ("可用 cards", len(paper_cards)),
+        ]
+    )
     if not papers:
         st.info("No papers ingested yet. Please upload PDFs first.")
 
@@ -1235,6 +2736,25 @@ with tab_ask:
                 st.error(f"RAG QA failed: {exc}")
 
 with tab_cards:
+    _render_section_header(
+        "Paper Cards 与 Comparison Table",
+        "生成、编辑和双语化论文卡片；卡片内容会写回缓存，并自动汇总成对比表。",
+        "Paper cards",
+    )
+    _render_workflow_strip(
+        [
+            ("选择论文", "从已入库 PDF 或缓存 card 中选择一个 paper_id。"),
+            ("生成/编辑卡片", "按字段维护中英双语内容，所有字段都可在卡片内编辑。"),
+            ("横向比较", "自动汇总 comparison table，支持下载 CSV。"),
+        ]
+    )
+    _render_inline_stats(
+        [
+            ("已入库", len(pipeline.list_papers())),
+            ("缓存 cards", len(paper_cards)),
+            ("双语 cards", sum(1 for card in paper_cards.values() if isinstance(card, dict) and isinstance(card.get("zh"), dict))),
+        ]
+    )
     st.caption("Paper card cache file: ./data/outputs/paper_cards_cache.json")
     papers = pipeline.list_papers()
     cached_paper_ids = sorted(paper_cards)
@@ -1349,6 +2869,25 @@ with tab_cards:
         st.info("Generate at least one paper card to build a comparison table.")
 
 with tab_review:
+    _render_section_header(
+        "综述生成与引用验证",
+        "基于 paper cards 写作综述，再逐 claim 检索证据、标记支持程度并生成保守改写版本。",
+        "Literature review",
+    )
+    _render_workflow_strip(
+        [
+            ("生成综述", "基于 paper cards 和主题生成初稿。"),
+            ("验证 claim", "逐条检索证据，标记 supported / weak / unsupported。"),
+            ("保守改写", "根据验证结果生成更稳健的综述版本并可比较差异。"),
+        ]
+    )
+    _render_inline_stats(
+        [
+            ("Paper cards", len(paper_cards)),
+            ("Review versions", len(review_versions)),
+            ("Verified claims", len(st.session_state.get("claim_verification", []))),
+        ]
+    )
     if len(paper_cards) < 1:
         st.info("Generate paper cards first.")
     else:
@@ -1737,6 +3276,25 @@ with tab_review:
                 st.info("Need at least two versions to compare.")
 
 with tab_ideas:
+    _render_section_header(
+        "研究想法生成",
+        "把已有 card、综述和验证结果转成下一步可探索的问题、方法和实验路线。",
+        "Research ideas",
+    )
+    _render_workflow_strip(
+        [
+            ("读取上下文", "综合 paper cards、原始综述、修订综述和 claim verification。"),
+            ("生成候选", "按主题输出多个研究问题、方法路径和实验建议。"),
+            ("导出沉淀", "将想法保存或下载，作为下一轮调研和实验规划的输入。"),
+        ]
+    )
+    _render_inline_stats(
+        [
+            ("Paper cards", len(paper_cards)),
+            ("有综述", "是" if st.session_state.get("literature_review", "").strip() else "否"),
+            ("有验证", "是" if st.session_state.get("claim_verification") else "否"),
+        ]
+    )
     if not paper_cards:
         st.info("Generate paper cards first.")
     else:
@@ -1809,7 +3367,18 @@ with tab_ideas:
             )
 
 with tab_workspace_chat:
-    st.subheader("Workspace Chat")
+    _render_section_header(
+        "Workspace Chat",
+        "LLM 可以读取当前工作区的 paper cards、入库论文、watchlist 和已保存报告，用于比较、追问和草拟报告。",
+        "Agent workspace",
+    )
+    _render_workflow_strip(
+        [
+            ("选择上下文", "限定 paper cards 或让助手读取完整 workspace。"),
+            ("委托生成", "可走 backend .env、Codex、OpenCode 或本地任务队列。"),
+            ("预览批准", "回答和报告都先进入可编辑预览，再保存到 workspace。"),
+        ]
+    )
     bridge_status = agent_bridge_status()
     context_payload = workspace_context_payload(
         paper_cards=paper_cards,
@@ -1961,7 +3530,26 @@ with tab_workspace_chat:
             )
 
 with tab_library:
+    _render_section_header(
+        "当前资料库",
+        "核对本地已入库论文、缓存卡片和 workspace 报告，便于确认 agent 与网页端共享状态。",
+        "Current library",
+    )
+    _render_workflow_strip(
+        [
+            ("本地论文", "查看已解析入库的 paper_id 和 card 状态。"),
+            ("缓存卡片", "浏览 paper card 缓存、来源和双语覆盖情况。"),
+            ("保存报告", "回看 workspace 中已批准保存的调研文档。"),
+        ]
+    )
     papers = pipeline.list_papers()
+    _render_inline_stats(
+        [
+            ("已入库", len(papers)),
+            ("缓存 cards", len(paper_cards)),
+            ("报告", len(list_workspace_reports(limit=50))),
+        ]
+    )
     if not papers:
         st.write("No papers ingested yet.")
     else:
