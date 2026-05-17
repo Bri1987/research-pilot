@@ -9,6 +9,7 @@ from urllib.parse import urlencode
 from urllib.request import Request
 from urllib.request import urlopen
 
+from researchpilot.cards.metadata_cards import normalize_doi
 from researchpilot.discovery.ccf_venues import CCF_DIRECTORY_SOURCE_URL
 from researchpilot.discovery.ccf_venues import CCF_SOURCE_VERSION
 from researchpilot.discovery.ccf_venues import DOMAIN_KEYWORDS
@@ -500,29 +501,62 @@ def _title_key(title: str) -> str:
 
 
 def _doi_key(value: Any) -> str:
-    doi = str(value or "").strip().lower()
-    doi = re.sub(r"^https?://(dx\.)?doi\.org/", "", doi)
-    doi = re.sub(r"^doi:\s*", "", doi)
-    return doi.strip()
+    return normalize_doi(value)
+
+
+def _paper_dedupe_keys(paper: dict[str, Any]) -> list[str]:
+    keys: list[str] = []
+    doi = _doi_key(paper.get("doi"))
+    if doi:
+        keys.append(f"doi:{doi}")
+    title = _title_key(str(paper.get("title", "")))
+    if title:
+        keys.append(f"title:{title}")
+    return keys
+
+
+def _prefer_paper(current: dict[str, Any], candidate: dict[str, Any]) -> dict[str, Any]:
+    current_score = float(current.get("relevance_score", 0.0) or 0.0)
+    candidate_score = float(candidate.get("relevance_score", 0.0) or 0.0)
+    if candidate.get("source") == "openreview" and current.get("source") != "openreview":
+        return candidate
+    if candidate_score > current_score:
+        return candidate
+    return current
 
 
 def deduplicate_papers(papers: list[dict[str, Any]]) -> list[dict[str, Any]]:
     best: dict[str, dict[str, Any]] = {}
     for paper in papers:
-        key = _doi_key(paper.get("doi")) or _title_key(str(paper.get("title", "")))
-        if not key:
+        keys = _paper_dedupe_keys(paper)
+        if not keys:
             continue
-        current = best.get(key)
-        if current is None:
-            best[key] = paper
+
+        matches: list[dict[str, Any]] = []
+        for key in keys:
+            current = best.get(key)
+            if current is not None and all(current is not item for item in matches):
+                matches.append(current)
+
+        selected = paper
+        for current in matches:
+            selected = _prefer_paper(current, selected)
+
+        for alias, current in list(best.items()):
+            if any(current is item for item in matches):
+                best[alias] = selected
+        for key in keys:
+            best[key] = selected
+
+    deduped: list[dict[str, Any]] = []
+    seen: set[int] = set()
+    for paper in best.values():
+        paper_identity = id(paper)
+        if paper_identity in seen:
             continue
-        current_score = float(current.get("relevance_score", 0.0) or 0.0)
-        score = float(paper.get("relevance_score", 0.0) or 0.0)
-        if paper.get("source") == "openreview" and current.get("source") != "openreview":
-            best[key] = paper
-        elif score > current_score:
-            best[key] = paper
-    return list(best.values())
+        seen.add(paper_identity)
+        deduped.append(paper)
+    return deduped
 
 
 def collect_venue_papers(

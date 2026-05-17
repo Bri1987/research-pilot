@@ -32,6 +32,13 @@ from researchpilot.search.arxiv_search import download_pdf_from_url
 from researchpilot.search.arxiv_search import search_arxiv_papers
 from researchpilot.storage.corpus_store import load_paper_cards_cache
 from researchpilot.storage.corpus_store import save_paper_cards_cache
+from researchpilot.storage.paper_labels import add_labels_to_papers
+from researchpilot.storage.paper_labels import all_paper_labels
+from researchpilot.storage.paper_labels import labels_for_paper
+from researchpilot.storage.paper_labels import load_paper_labels
+from researchpilot.storage.paper_labels import normalize_labels
+from researchpilot.storage.paper_labels import save_paper_labels
+from researchpilot.storage.paper_labels import set_paper_labels
 from researchpilot.watchlist.watchlist_ranker import rank_papers_by_watchlist
 from researchpilot.watchlist.recommendations import recommendation_to_watch_item
 from researchpilot.watchlist.recommendations import recommend_watchlist_items
@@ -61,7 +68,7 @@ st.set_page_config(
 
 
 def _escape_html(value: object) -> str:
-    return html_lib.escape(str(value or ""), quote=True)
+    return html_lib.escape("" if value is None else str(value), quote=True)
 
 
 st.html(
@@ -587,6 +594,95 @@ st.html(
         font-size: 13px;
     }
 
+    .rp-watch-card {
+        min-height: 330px;
+        padding: 18px;
+        border: 1px solid rgba(107, 123, 148, 0.18);
+        border-radius: 20px;
+        background: rgba(255, 255, 255, 0.76);
+        box-shadow: var(--rp-shadow-soft);
+        backdrop-filter: blur(18px);
+    }
+
+    .rp-watch-card-head {
+        display: flex;
+        align-items: flex-start;
+        justify-content: space-between;
+        gap: 12px;
+        padding-bottom: 12px;
+        border-bottom: 1px solid rgba(107, 123, 148, 0.14);
+        margin-bottom: 13px;
+    }
+
+    .rp-watch-name {
+        margin: 6px 0 0;
+        color: #172033;
+        font-size: 20px;
+        font-weight: 840;
+        line-height: 1.22;
+        letter-spacing: 0;
+    }
+
+    .rp-kv-grid {
+        display: grid;
+        grid-template-columns: 1fr;
+        gap: 9px;
+    }
+
+    .rp-kv-row {
+        padding: 10px 11px;
+        border: 1px solid rgba(107, 123, 148, 0.13);
+        border-radius: 14px;
+        background: rgba(248, 251, 255, 0.72);
+    }
+
+    .rp-kv-key {
+        color: #6b7788;
+        font-size: 11px;
+        font-weight: 800;
+        letter-spacing: 0;
+        text-transform: uppercase;
+        margin-bottom: 7px;
+    }
+
+    .rp-kv-value {
+        color: #273348;
+        font-size: 13px;
+        line-height: 1.55;
+        word-break: break-word;
+    }
+
+    .rp-label-row {
+        display: flex;
+        align-items: center;
+        gap: 7px;
+        flex-wrap: wrap;
+    }
+
+    .rp-label-chip {
+        display: inline-flex;
+        align-items: center;
+        min-height: 28px;
+        padding: 6px 9px;
+        border-radius: 999px;
+        border: 1px solid rgba(36, 107, 254, 0.20);
+        background: rgba(36, 107, 254, 0.08);
+        color: #154fc7;
+        font-size: 12px;
+        font-weight: 760;
+        line-height: 1;
+    }
+
+    .rp-paper-select-card {
+        margin: 12px 0 16px;
+        padding: 16px;
+        border: 1px solid rgba(107, 123, 148, 0.16);
+        border-radius: 18px;
+        background: rgba(255, 255, 255, 0.76);
+        box-shadow: var(--rp-shadow-soft);
+        backdrop-filter: blur(16px);
+    }
+
     .rp-window-bar {
         display: flex;
         align-items: center;
@@ -870,6 +966,8 @@ if "pipeline" not in st.session_state:
     st.session_state["pipeline"] = ResearchPilotPipeline()
 if "paper_cards" not in st.session_state:
     st.session_state["paper_cards"] = load_paper_cards_cache()
+if "paper_labels" not in st.session_state:
+    st.session_state["paper_labels"] = load_paper_labels()
 if "literature_review" not in st.session_state:
     st.session_state["literature_review"] = ""
 if "claim_verification" not in st.session_state:
@@ -915,6 +1013,7 @@ if "workspace_chat_draft" not in st.session_state:
 
 pipeline: ResearchPilotPipeline = st.session_state["pipeline"]
 paper_cards: dict[str, dict] = st.session_state["paper_cards"]
+paper_labels: dict[str, list[str]] = st.session_state["paper_labels"]
 literature_review: str = st.session_state["literature_review"]
 claim_verification: list[dict] = st.session_state["claim_verification"]
 revised_literature_review: str = st.session_state["revised_literature_review"]
@@ -1250,6 +1349,199 @@ def _extract_json_object(text: str) -> dict:
 
 def _safe_widget_key(value: str) -> str:
     return re.sub(r"[^A-Za-z0-9_]+", "_", str(value or "item"))[:120]
+
+
+def _join_display(values: object, empty: str = "未记录") -> str:
+    items = [str(item).strip() for item in (values or []) if str(item).strip()] if isinstance(values, list) else []
+    if not items:
+        return empty
+    return " / ".join(items)
+
+
+def _render_chips(values: object, class_name: str = "rp-label-chip", empty: str = "未标记") -> str:
+    items = normalize_labels(values)
+    if not items:
+        return f'<span class="{class_name}">{_escape_html(empty)}</span>'
+    return "".join(f'<span class="{class_name}">{_escape_html(item)}</span>' for item in items)
+
+
+def _paper_title_for_select(paper_id: str) -> str:
+    card = paper_cards.get(paper_id)
+    if isinstance(card, dict):
+        title = str(card.get("title", "") or "").strip()
+        if title:
+            return title
+        source_meta = card.get("source_metadata", {})
+        if isinstance(source_meta, dict) and source_meta.get("title"):
+            return str(source_meta.get("title", "")).strip()
+    return str(paper_id)
+
+
+def _paper_option_label(paper_id: str) -> str:
+    title = _paper_title_for_select(paper_id)
+    labels = labels_for_paper(paper_id, paper_labels)
+    suffix = f" [{', '.join(labels)}]" if labels else " [未标记]"
+    return f"{title}{suffix}"
+
+
+def _paper_payload_for_labeling(paper_id: str) -> dict:
+    card = paper_cards.get(paper_id)
+    if not isinstance(card, dict):
+        return {
+            "paper_id": paper_id,
+            "title": _paper_title_for_select(paper_id),
+            "labels": labels_for_paper(paper_id, paper_labels),
+        }
+    return {
+        "paper_id": paper_id,
+        "title": _paper_title_for_select(paper_id),
+        "problem": card.get("problem", ""),
+        "method": card.get("method", ""),
+        "contribution": card.get("contribution", ""),
+        "relevance": card.get("relevance", ""),
+        "source_metadata": card.get("source_metadata", {}),
+        "labels": labels_for_paper(paper_id, paper_labels),
+    }
+
+
+def _agent_label_prompt(target_paper_ids: list[str], existing_labels: list[str]) -> str:
+    papers = [
+        _paper_payload_for_labeling(paper_id)
+        for paper_id in target_paper_ids
+        if not labels_for_paper(paper_id, paper_labels)
+    ]
+    schema = {
+        "assignments": [
+            {
+                "paper_id": "string",
+                "labels": ["existing or new label"],
+                "reason": "brief Chinese reason",
+                "is_new_label": False,
+            }
+        ]
+    }
+    return (
+        "你是 ResearchPilot 的本地科研分类 agent。请只给尚未分配 label 的论文分配类别。"
+        "如果现有类别足够贴切，优先使用现有类别；如果没有合适类别，可以创建新的简短中文或英文类别。"
+        "每篇论文最多给 1-2 个 label。不要修改已有 label 的论文。只返回严格 JSON 对象，不要 Markdown。\n\n"
+        f"目标 JSON schema:\n{json.dumps(schema, ensure_ascii=False, indent=2)}\n\n"
+        f"现有类别:\n{json.dumps(existing_labels, ensure_ascii=False, indent=2)}\n\n"
+        f"待分类论文:\n{_compact_json(papers, limit=52000)}"
+    )
+
+
+def _apply_agent_label_assignments(response_text: str) -> tuple[int, list[str]]:
+    parsed = _extract_json_object(response_text)
+    assignments = parsed.get("assignments", []) if isinstance(parsed, dict) else []
+    if not isinstance(assignments, list):
+        return 0, ["Agent response did not contain an assignments list."]
+
+    labels = load_paper_labels()
+    applied = 0
+    skipped: list[str] = []
+    for item in assignments:
+        if not isinstance(item, dict):
+            continue
+        paper_id = str(item.get("paper_id", "")).strip()
+        if not paper_id:
+            continue
+        if labels_for_paper(paper_id, labels):
+            skipped.append(f"{paper_id}: already labeled")
+            continue
+        label_values = normalize_labels(item.get("labels", []))
+        if not label_values:
+            skipped.append(f"{paper_id}: no labels returned")
+            continue
+        labels[paper_id] = label_values[:2]
+        applied += 1
+    if applied:
+        save_paper_labels(labels)
+        st.session_state["paper_labels"] = labels
+    return applied, skipped
+
+
+def _render_watch_card(item: dict, idx: int) -> None:
+    item_name = str(item.get("name", ""))
+    item_type = str(item.get("type", "custom") or "custom")
+    safe_name = _safe_widget_key(item_name)
+    authors = item.get("authors", []) or []
+    institutions = item.get("institutions", []) or []
+    keywords = item.get("keywords", []) or []
+    homepage_urls = item.get("homepage_urls", []) or []
+    notes = str(item.get("notes", "") or "").strip()
+    tracking = (
+        st.session_state.get("watchlist_tracking", {}).get(watch_item_key(item))
+        or get_watch_item_tracking(item)
+    )
+    tracked_count = int((tracking or {}).get("paper_count", 0) or 0)
+    st.html(
+        f"""
+        <div class="rp-watch-card">
+            <div class="rp-watch-card-head">
+                <div>
+                    <span class="rp-chip rp-chip-blue">{_escape_html(item_type)}</span>
+                    <div class="rp-watch-name">{_escape_html(item_name)}</div>
+                </div>
+                <span class="rp-chip rp-chip-green">{tracked_count} papers</span>
+            </div>
+            <div class="rp-kv-grid">
+                <div class="rp-kv-row">
+                    <div class="rp-kv-key">authors</div>
+                    <div class="rp-label-row">{_render_chips(authors, class_name="rp-chip", empty="未记录")}</div>
+                </div>
+                <div class="rp-kv-row">
+                    <div class="rp-kv-key">institutions</div>
+                    <div class="rp-kv-value">{_escape_html(_join_display(institutions))}</div>
+                </div>
+                <div class="rp-kv-row">
+                    <div class="rp-kv-key">keywords</div>
+                    <div class="rp-label-row">{_render_chips(keywords, class_name="rp-chip rp-chip-amber", empty="未记录")}</div>
+                </div>
+                <div class="rp-kv-row">
+                    <div class="rp-kv-key">homepage / profiles</div>
+                    <div class="rp-kv-value">{_escape_html(_join_display(homepage_urls))}</div>
+                </div>
+                <div class="rp-kv-row">
+                    <div class="rp-kv-key">notes</div>
+                    <div class="rp-kv-value">{_escape_html(notes or "未记录")}</div>
+                </div>
+            </div>
+        </div>
+        """
+    )
+    action_cols = st.columns([1, 1, 1])
+    if _should_track_watch_item(item):
+        if action_cols[0].button(
+            "追踪论文",
+            key=f"watchlist_track_card_{idx}_{safe_name}",
+            width="stretch",
+        ):
+            try:
+                with st.spinner("正在检索主页索引与近 6 个月论文..."):
+                    tracking = _refresh_watch_item_tracking(item, months=6, max_results=25)
+                st.success(f"追踪完成：发现 {tracking.get('paper_count', 0)} 篇候选论文。")
+                st.rerun()
+            except Exception as exc:
+                st.error(f"追踪失败：{exc}")
+    with action_cols[1].popover("详情", use_container_width=True):
+        st.json(item)
+        st.markdown("#### 主页 / 学术索引")
+        _render_homepage_index(homepage_index_for_watch_item(item))
+        if tracking:
+            st.markdown("#### 主页索引与近 6 个月论文")
+            _render_tracking_papers(item, tracking, idx)
+    if action_cols[2].button(
+        "Delete",
+        key=f"watchlist_delete_card_{idx}_{safe_name}",
+        width="stretch",
+    ):
+        try:
+            updated_watchlist = delete_watch_item(idx)
+            st.session_state["watchlist"] = updated_watchlist
+            st.success(f"Deleted watch item: {item_name}")
+            st.rerun()
+        except Exception as exc:
+            st.error(f"Failed to delete watch item: {exc}")
 
 
 def _collection_rows(collection: dict | None) -> list[dict]:
@@ -2526,63 +2818,11 @@ with tab_watchlist:
     if not watchlist:
         st.info("暂无关注对象。")
     else:
+        st.caption("每个关注对象以浮动卡片展示，key-value 字段可直接扫读；详情弹层保留原始 JSON、主页索引与追踪论文。")
+        watch_cols = st.columns(3)
         for idx, item in enumerate(watchlist):
-            item_name = str(item.get("name", ""))
-            item_type = str(item.get("type", ""))
-            with st.expander(f"{idx + 1}. {item_name} ({item_type})"):
-                st.markdown(f"**name**: {item_name}")
-                st.markdown(f"**type**: {item_type}")
-                st.markdown(f"**authors**: {item.get('authors', [])}")
-                st.markdown(f"**institutions**: {item.get('institutions', [])}")
-                st.markdown(f"**keywords**: {item.get('keywords', [])}")
-                st.markdown(f"**homepage_urls**: {item.get('homepage_urls', [])}")
-                st.markdown(f"**notes**: {item.get('notes', '')}")
-                if _should_track_watch_item(item):
-                    st.divider()
-                    st.markdown("#### 主页索引与近 6 个月论文")
-                    track_cols = st.columns([1, 1, 2])
-                    tracking = (
-                        st.session_state.get("watchlist_tracking", {}).get(watch_item_key(item))
-                        or get_watch_item_tracking(item)
-                    )
-                    if track_cols[0].button(
-                        "追踪近 6 个月论文",
-                        key=f"watchlist_track_{idx}_{_safe_widget_key(item_name)}",
-                        width="stretch",
-                    ):
-                        try:
-                            with st.spinner("正在检索主页索引与近 6 个月论文..."):
-                                tracking = _refresh_watch_item_tracking(
-                                    item,
-                                    months=6,
-                                    max_results=25,
-                                )
-                            st.success(f"追踪完成：发现 {tracking.get('paper_count', 0)} 篇候选论文。")
-                        except Exception as exc:
-                            st.error(f"追踪失败：{exc}")
-                    if tracking:
-                        track_cols[1].caption(f"last tracked: {tracking.get('tracked_at', '')}")
-                        _render_tracking_papers(item, tracking, idx)
-                    else:
-                        track_cols[1].caption("尚未追踪")
-                        with st.expander("主页 / 学术索引", expanded=True):
-                            _render_homepage_index(homepage_index_for_watch_item(item))
-                        st.info("新加入的课题组/学者/机构会自动触发一次追踪；已有关注对象可点击上方按钮手动追踪。")
-                else:
-                    with st.expander("主页 / 学术索引"):
-                        _render_homepage_index(homepage_index_for_watch_item(item))
-                if st.button(
-                    "Delete",
-                    key=f"watchlist_delete_{idx}_{item_name}",
-                    width="content",
-                ):
-                    try:
-                        updated_watchlist = delete_watch_item(idx)
-                        st.session_state["watchlist"] = updated_watchlist
-                        st.success(f"Deleted watch item: {item_name}")
-                        st.rerun()
-                    except Exception as exc:
-                        st.error(f"Failed to delete watch item: {exc}")
+            with watch_cols[idx % 3]:
+                _render_watch_card(item, idx)
 
     st.divider()
     st.subheader("Watchlist Trend Summary")
@@ -2745,9 +2985,9 @@ with tab_cards:
     )
     _render_workflow_strip(
         [
-            ("选择论文", "从已入库 PDF 或缓存 card 中选择一个 paper_id。"),
+            ("选择论文", "按论文标题选择 paper card，底层仍保留唯一 paper_id。"),
             ("生成/编辑卡片", "按字段维护中英双语内容，所有字段都可在卡片内编辑。"),
-            ("横向比较", "自动汇总 comparison table，支持下载 CSV。"),
+            ("分类与比较", "通过 label 过滤、手动/agent 标注，并自动汇总 comparison table。"),
         ]
     )
     _render_inline_stats(
@@ -2757,21 +2997,205 @@ with tab_cards:
             ("双语 cards", sum(1 for card in paper_cards.values() if isinstance(card, dict) and isinstance(card.get("zh"), dict))),
         ]
     )
+    paper_labels = load_paper_labels()
+    st.session_state["paper_labels"] = paper_labels
     st.caption("Paper card cache file: ./data/outputs/paper_cards_cache.json")
     papers = pipeline.list_papers()
     cached_paper_ids = sorted(paper_cards)
-    selectable_papers = sorted(set(papers).union(cached_paper_ids))
+    all_selectable_papers = sorted(set(papers).union(cached_paper_ids), key=lambda paper_id: _paper_title_for_select(paper_id).lower())
+    available_labels = all_paper_labels(paper_labels)
     if cached_paper_ids:
         st.caption(f"Loaded cached paper cards: {len(cached_paper_ids)}")
-    if not selectable_papers:
+    if not all_selectable_papers:
         st.info("No papers ingested and no cached paper cards found yet.")
     else:
-        selected_paper_id = st.selectbox(
-            "Select paper_id",
-            options=selectable_papers,
-            key="paper_card_selected_paper",
+        st.html('<div class="rp-paper-select-card">')
+        filter_col, select_col = st.columns([0.26, 0.74])
+        label_filter = filter_col.selectbox(
+            "Filter by label",
+            options=["全部", "未标记"] + available_labels,
+            key="paper_card_label_filter",
         )
-        selected_is_ingested = selected_paper_id in papers
+        if label_filter == "全部":
+            selectable_papers = all_selectable_papers
+        elif label_filter == "未标记":
+            selectable_papers = [
+                paper_id for paper_id in all_selectable_papers if not labels_for_paper(paper_id, paper_labels)
+            ]
+        else:
+            selectable_papers = [
+                paper_id
+                for paper_id in all_selectable_papers
+                if label_filter in labels_for_paper(paper_id, paper_labels)
+            ]
+        if not selectable_papers:
+            st.info("当前 label 过滤条件下没有 paper card。")
+            selected_paper_id = None
+        else:
+            selected_paper_id = select_col.selectbox(
+                "Select paper by title",
+                options=selectable_papers,
+                format_func=_paper_option_label,
+                key="paper_card_selected_paper",
+            )
+            st.caption(f"Selected paper_id: `{selected_paper_id}`")
+            st.html(
+                f"""
+                <div class="rp-label-row" style="margin:8px 0 0;">
+                    <span class="rp-chip">Labels</span>
+                    {_render_chips(labels_for_paper(selected_paper_id, paper_labels))}
+                </div>
+                """
+            )
+        st.html("</div>")
+
+        st.subheader("Library Labels")
+        with st.container(border=True):
+            if selected_paper_id:
+                single_label_col, batch_label_col = st.columns(2)
+                with single_label_col:
+                    st.markdown("#### 单篇标注")
+                    current_labels = labels_for_paper(selected_paper_id, paper_labels)
+                    selected_existing_labels = st.multiselect(
+                        "Existing labels",
+                        options=available_labels,
+                        default=[label for label in current_labels if label in available_labels],
+                        key=f"single_existing_labels_{_safe_widget_key(selected_paper_id)}",
+                    )
+                    new_labels_text = st.text_input(
+                        "New labels",
+                        value="",
+                        key=f"single_new_labels_{_safe_widget_key(selected_paper_id)}",
+                        placeholder="formal specs, verified codegen",
+                    )
+                    action_cols = st.columns(2)
+                    if action_cols[0].button("Save Labels", width="stretch", key=f"save_labels_{_safe_widget_key(selected_paper_id)}"):
+                        combined = selected_existing_labels + normalize_labels(new_labels_text)
+                        paper_labels = set_paper_labels(selected_paper_id, combined, labels=paper_labels)
+                        st.session_state["paper_labels"] = paper_labels
+                        st.success("Labels saved.")
+                        st.rerun()
+                    if action_cols[1].button("Clear Labels", width="stretch", key=f"clear_labels_{_safe_widget_key(selected_paper_id)}"):
+                        paper_labels = set_paper_labels(selected_paper_id, [], labels=paper_labels)
+                        st.session_state["paper_labels"] = paper_labels
+                        st.success("Labels cleared.")
+                        st.rerun()
+                with batch_label_col:
+                    st.markdown("#### 批量标注")
+                    batch_targets = st.multiselect(
+                        "Papers",
+                        options=all_selectable_papers,
+                        default=[],
+                        format_func=_paper_option_label,
+                        key="batch_label_targets",
+                    )
+                    batch_existing_labels = st.multiselect(
+                        "Batch existing labels",
+                        options=available_labels,
+                        key="batch_existing_labels",
+                    )
+                    batch_new_labels_text = st.text_input(
+                        "Batch new labels",
+                        value="",
+                        key="batch_new_labels",
+                        placeholder="new label, another label",
+                    )
+                    batch_overwrite = st.checkbox("Overwrite existing labels", value=False, key="batch_label_overwrite")
+                    batch_only_unlabeled = st.checkbox("Only apply to unlabeled papers", value=False, key="batch_only_unlabeled")
+                    if st.button("Apply Batch Labels", width="stretch", key="apply_batch_labels"):
+                        if not batch_targets:
+                            st.warning("Please select at least one paper.")
+                        else:
+                            combined = batch_existing_labels + normalize_labels(batch_new_labels_text)
+                            if not combined:
+                                st.warning("Please choose or enter at least one label.")
+                            else:
+                                paper_labels = add_labels_to_papers(
+                                    batch_targets,
+                                    combined,
+                                    overwrite=batch_overwrite,
+                                    only_unlabeled=batch_only_unlabeled,
+                                    labels=paper_labels,
+                                )
+                                st.session_state["paper_labels"] = paper_labels
+                                st.success(f"Applied labels to {len(batch_targets)} selected papers.")
+                                st.rerun()
+
+            st.divider()
+            st.markdown("#### Agent-assisted Labeling")
+            unlabeled_papers = [
+                paper_id for paper_id in all_selectable_papers if not labels_for_paper(paper_id, paper_labels)
+            ]
+            agent_cols = st.columns([0.28, 0.24, 0.24, 0.24])
+            with agent_cols[0]:
+                agent_provider = st.selectbox(
+                    "Agent provider",
+                    options=["queue", "codex", "opencode"],
+                    index=0,
+                    key="paper_label_agent_provider",
+                )
+            with agent_cols[1]:
+                agent_target_mode = st.selectbox(
+                    "Target",
+                    options=["Selected unlabeled", "All unlabeled"],
+                    index=0,
+                    key="paper_label_agent_target_mode",
+                )
+            with agent_cols[2]:
+                agent_model = st.text_input(
+                    "Model override",
+                    value="",
+                    key="paper_label_agent_model",
+                    placeholder="optional",
+                )
+            with agent_cols[3]:
+                agent_timeout = st.slider(
+                    "Timeout",
+                    min_value=60,
+                    max_value=900,
+                    value=300,
+                    step=60,
+                    key="paper_label_agent_timeout",
+                )
+            agent_selected_targets = st.multiselect(
+                "Selected unlabeled papers for agent",
+                options=unlabeled_papers,
+                default=unlabeled_papers[: min(8, len(unlabeled_papers))],
+                format_func=_paper_option_label,
+                key="paper_label_agent_targets",
+                disabled=agent_target_mode == "All unlabeled",
+            )
+            if st.button("Run / Queue Agent Labeling", width="stretch", key="run_agent_labeling"):
+                target_ids = unlabeled_papers if agent_target_mode == "All unlabeled" else agent_selected_targets
+                if not target_ids:
+                    st.warning("没有未标注论文可交给 agent。")
+                else:
+                    prompt = _agent_label_prompt(target_ids, available_labels)
+                    try:
+                        result = _run_or_queue_agent_generation(
+                            provider=agent_provider,
+                            task_type="paper_label_assignment",
+                            prompt=prompt,
+                            model=agent_model,
+                            timeout_seconds=agent_timeout,
+                            payload={"paper_ids": target_ids, "existing_labels": available_labels},
+                        )
+                        if result["mode"] == "queued":
+                            st.info(result["output"])
+                        else:
+                            applied, skipped = _apply_agent_label_assignments(result["output"])
+                            st.success(f"Agent labels applied: {applied}")
+                            if skipped:
+                                st.caption("Skipped: " + "; ".join(skipped[:8]))
+                            st.rerun()
+                    except Exception as exc:
+                        st.error(f"Agent labeling failed: {exc}")
+
+        if not selected_paper_id:
+            current_card = None
+            selected_is_ingested = False
+        else:
+            selected_is_ingested = selected_paper_id in papers
         if not selected_is_ingested:
             st.info("This paper card is loaded from cache; ingest the PDF first if you want to regenerate it from full text.")
         if st.button("Generate Paper Card", width="stretch", disabled=not selected_is_ingested):
@@ -2856,7 +3280,27 @@ with tab_cards:
     st.divider()
     st.subheader("Comparison Table")
     if len(paper_cards) >= 1:
-        comparison_df = build_comparison_table(paper_cards)
+        comparison_scope = st.selectbox(
+            "Comparison scope",
+            options=["All cached cards", "Current label filter"],
+            index=0,
+            key="comparison_table_scope",
+        )
+        if comparison_scope == "Current label filter" and "selectable_papers" in locals():
+            comparison_cards = {
+                paper_id: paper_cards[paper_id]
+                for paper_id in selectable_papers
+                if paper_id in paper_cards
+            }
+        else:
+            comparison_cards = paper_cards
+        comparison_df = build_comparison_table(comparison_cards)
+        if "paper_id" in comparison_df.columns:
+            comparison_df.insert(
+                1,
+                "labels",
+                comparison_df["paper_id"].map(lambda paper_id: ", ".join(labels_for_paper(str(paper_id), paper_labels))),
+            )
         st.dataframe(comparison_df, width="stretch")
         csv_data = comparison_df.to_csv(index=False)
         st.download_button(
@@ -3428,6 +3872,7 @@ with tab_workspace_chat:
         "Limit card context",
         options=sorted(paper_cards),
         default=sorted(paper_cards)[: min(8, len(paper_cards))],
+        format_func=_paper_option_label,
         key="workspace_chat_selected_cards",
         help="Leave empty to let the assistant see all cached paper cards.",
     )
@@ -3545,13 +3990,91 @@ with tab_library:
         ]
     )
     papers = pipeline.list_papers()
+    paper_labels = load_paper_labels()
+    st.session_state["paper_labels"] = paper_labels
+    library_paper_ids = sorted(set(papers).union(paper_cards), key=lambda paper_id: _paper_title_for_select(paper_id).lower())
+    available_labels = all_paper_labels(paper_labels)
     _render_inline_stats(
         [
             ("已入库", len(papers)),
             ("缓存 cards", len(paper_cards)),
             ("报告", len(list_workspace_reports(limit=50))),
+            ("Labels", len(available_labels)),
         ]
     )
+    st.subheader("Library Label Management")
+    with st.container(border=True):
+        label_filter_col, batch_col = st.columns([0.28, 0.72])
+        library_label_filter = label_filter_col.selectbox(
+            "View by label",
+            options=["全部", "未标记"] + available_labels,
+            key="library_label_filter",
+        )
+        with batch_col:
+            library_batch_targets = st.multiselect(
+                "Batch label papers",
+                options=library_paper_ids,
+                format_func=_paper_option_label,
+                key="library_batch_label_targets",
+            )
+            lib_label_cols = st.columns([0.34, 0.34, 0.16, 0.16])
+            with lib_label_cols[0]:
+                library_existing_labels = st.multiselect(
+                    "Existing labels",
+                    options=available_labels,
+                    key="library_existing_labels",
+                )
+            with lib_label_cols[1]:
+                library_new_labels = st.text_input(
+                    "New labels",
+                    value="",
+                    key="library_new_labels",
+                    placeholder="verified codegen, formal specs",
+                )
+            with lib_label_cols[2]:
+                library_overwrite = st.checkbox("Overwrite", value=False, key="library_label_overwrite")
+            with lib_label_cols[3]:
+                library_only_unlabeled = st.checkbox("Unlabeled only", value=True, key="library_label_only_unlabeled")
+            if st.button("Apply Library Labels", width="stretch", key="apply_library_labels"):
+                combined = library_existing_labels + normalize_labels(library_new_labels)
+                if not library_batch_targets:
+                    st.warning("Please select papers first.")
+                elif not combined:
+                    st.warning("Please choose or enter labels first.")
+                else:
+                    paper_labels = add_labels_to_papers(
+                        library_batch_targets,
+                        combined,
+                        overwrite=library_overwrite,
+                        only_unlabeled=library_only_unlabeled,
+                        labels=paper_labels,
+                    )
+                    st.session_state["paper_labels"] = paper_labels
+                    st.success("Library labels updated.")
+                    st.rerun()
+
+        if library_label_filter == "未标记":
+            visible_library_ids = [paper_id for paper_id in library_paper_ids if not labels_for_paper(paper_id, paper_labels)]
+        elif library_label_filter == "全部":
+            visible_library_ids = library_paper_ids
+        else:
+            visible_library_ids = [
+                paper_id for paper_id in library_paper_ids if library_label_filter in labels_for_paper(paper_id, paper_labels)
+            ]
+        st.dataframe(
+            [
+                {
+                    "title": _paper_title_for_select(paper_id),
+                    "paper_id": paper_id,
+                    "labels": ", ".join(labels_for_paper(paper_id, paper_labels)),
+                    "ingested": paper_id in papers,
+                    "has_card": paper_id in paper_cards,
+                }
+                for paper_id in visible_library_ids
+            ],
+            width="stretch",
+        )
+
     if not papers:
         st.write("No papers ingested yet.")
     else:
@@ -3559,7 +4082,8 @@ with tab_library:
         for paper_id in papers:
             has_card = paper_id in paper_cards
             card_status = "paper_card_ready" if has_card else "paper_card_not_generated"
-            st.write(f"- {paper_id} ({card_status})")
+            label_text = ", ".join(labels_for_paper(paper_id, paper_labels)) or "unlabeled"
+            st.write(f"- {_paper_title_for_select(paper_id)} `{paper_id}` ({card_status}; labels: {label_text})")
     st.divider()
     st.subheader("Cached Paper Cards")
     if paper_cards:
@@ -3569,6 +4093,7 @@ with tab_library:
                 {
                     "paper_id": paper_id,
                     "title": card.get("title", "") if isinstance(card, dict) else "",
+                    "labels": ", ".join(labels_for_paper(paper_id, paper_labels)),
                     "has_zh": bool(isinstance(card, dict) and isinstance(card.get("zh"), dict)),
                     "source": (
                         card.get("source_metadata", {}).get("source", "")

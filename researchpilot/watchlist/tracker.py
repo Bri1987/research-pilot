@@ -15,6 +15,7 @@ from urllib.request import Request
 from urllib.request import urlopen
 
 from researchpilot.cards.metadata_cards import metadata_paper_id
+from researchpilot.cards.metadata_cards import normalize_doi
 from researchpilot.discovery.semantic_scholar import search_semantic_scholar
 
 
@@ -328,10 +329,7 @@ def _title_key(title: str) -> str:
 
 
 def _doi_key(value: Any) -> str:
-    doi = str(value or "").strip().lower()
-    doi = re.sub(r"^https?://(dx\.)?doi\.org/", "", doi)
-    doi = re.sub(r"^doi:\s*", "", doi)
-    return doi.strip()
+    return normalize_doi(value)
 
 
 def _dedupe_key(paper: dict[str, Any]) -> str:
