@@ -334,10 +334,20 @@ def _doi_key(value: Any) -> str:
     return doi.strip()
 
 
+def _dedupe_key(paper: dict[str, Any]) -> str:
+    doi = _doi_key(paper.get("doi"))
+    if doi:
+        return f"doi:{doi}"
+    title = _title_key(str(paper.get("title", "")))
+    if title:
+        return f"title:{title}"
+    return metadata_paper_id(paper)
+
+
 def _dedupe_papers(papers: list[dict[str, Any]]) -> list[dict[str, Any]]:
     best: dict[str, dict[str, Any]] = {}
     for paper in papers:
-        key = _doi_key(paper.get("doi")) or metadata_paper_id(paper) or _title_key(str(paper.get("title", "")))
+        key = _dedupe_key(paper)
         if not key:
             continue
         current = best.get(key)
