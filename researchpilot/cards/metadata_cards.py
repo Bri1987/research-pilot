@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import re
 from typing import Any
 
 
@@ -18,10 +19,19 @@ CARD_FIELDS = [
 ]
 
 
+def normalize_doi(value: Any) -> str:
+    doi = str(value or "").strip().lower()
+    if not doi:
+        return ""
+    doi = re.sub(r"^doi\s*:\s*", "", doi)
+    doi = re.sub(r"^(?:https?://)?(?:dx\.)?doi\.org/", "", doi)
+    return doi.strip()
+
+
 def metadata_paper_id(paper: dict[str, Any]) -> str:
-    doi = str(paper.get("doi", "") or "").strip().lower()
+    doi = normalize_doi(paper.get("doi"))
     if doi:
-        return f"doi:{doi.removeprefix('https://doi.org/')}"
+        return f"doi:{doi}"
 
     arxiv_id = str(paper.get("arxiv_id", "") or "").strip()
     if arxiv_id:

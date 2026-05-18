@@ -9,6 +9,7 @@ from urllib.parse import urlencode
 from urllib.request import Request
 from urllib.request import urlopen
 
+from researchpilot.cards.metadata_cards import normalize_doi
 from researchpilot.discovery.ccf_venues import CCF_DIRECTORY_SOURCE_URL
 from researchpilot.discovery.ccf_venues import CCF_SOURCE_VERSION
 from researchpilot.discovery.ccf_venues import DOMAIN_KEYWORDS
@@ -500,29 +501,78 @@ def _title_key(title: str) -> str:
 
 
 def _doi_key(value: Any) -> str:
-    doi = str(value or "").strip().lower()
-    doi = re.sub(r"^https?://(dx\.)?doi\.org/", "", doi)
-    doi = re.sub(r"^doi:\s*", "", doi)
-    return doi.strip()
+    return normalize_doi(value)
+
+
+def _prefer_paper(current: dict[str, Any], candidate: dict[str, Any]) -> dict[str, Any]:
+    current_score = float(current.get("relevance_score", 0.0) or 0.0)
+    candidate_score = float(candidate.get("relevance_score", 0.0) or 0.0)
+    current_doi = _doi_key(current.get("doi"))
+    candidate_doi = _doi_key(candidate.get("doi"))
+    if candidate_doi and not current_doi:
+        return candidate
+    if current_doi and not candidate_doi:
+        return current
+    if candidate.get("source") == "openreview" and current.get("source") != "openreview":
+        return candidate
+    if candidate_score > current_score:
+        return candidate
+    return current
+
+
+def _matching_dedupe_group(
+    doi: str,
+    title: str,
+    groups: list[dict[str, Any]],
+    doi_index: dict[str, int],
+    title_index: dict[str, set[int]],
+) -> int | None:
+    if doi and doi in doi_index:
+        return doi_index[doi]
+    if not title:
+        return None
+
+    title_matches = title_index.get(title, set())
+    if not title_matches:
+        return None
+
+    no_doi_matches = sorted(idx for idx in title_matches if not groups[idx]["dois"])
+    if not doi:
+        if no_doi_matches:
+            return no_doi_matches[0]
+        return next(iter(title_matches)) if len(title_matches) == 1 else None
+
+    if len(title_matches) == 1 and no_doi_matches:
+        return no_doi_matches[0]
+    return None
 
 
 def deduplicate_papers(papers: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    best: dict[str, dict[str, Any]] = {}
+    groups: list[dict[str, Any]] = []
+    doi_index: dict[str, int] = {}
+    title_index: dict[str, set[int]] = {}
+
     for paper in papers:
-        key = _doi_key(paper.get("doi")) or _title_key(str(paper.get("title", "")))
-        if not key:
+        doi = _doi_key(paper.get("doi"))
+        title = _title_key(str(paper.get("title", "")))
+        if not doi and not title:
             continue
-        current = best.get(key)
-        if current is None:
-            best[key] = paper
-            continue
-        current_score = float(current.get("relevance_score", 0.0) or 0.0)
-        score = float(paper.get("relevance_score", 0.0) or 0.0)
-        if paper.get("source") == "openreview" and current.get("source") != "openreview":
-            best[key] = paper
-        elif score > current_score:
-            best[key] = paper
-    return list(best.values())
+
+        match_idx = _matching_dedupe_group(doi, title, groups, doi_index, title_index)
+        if match_idx is None:
+            match_idx = len(groups)
+            groups.append({"paper": paper, "dois": set(), "titles": set()})
+        else:
+            groups[match_idx]["paper"] = _prefer_paper(groups[match_idx]["paper"], paper)
+
+        if doi:
+            groups[match_idx]["dois"].add(doi)
+            doi_index[doi] = match_idx
+        if title:
+            groups[match_idx]["titles"].add(title)
+            title_index.setdefault(title, set()).add(match_idx)
+
+    return [group["paper"] for group in groups]
 
 
 def collect_venue_papers(
