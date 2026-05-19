@@ -1,5 +1,6 @@
 .venv/
 .env
+.streamlit-home/
 __pycache__/
 *.pyc
 .DS_Store
@@ -8,4 +9,5 @@ data/uploads/*
 data/chunks/*
 data/indices/*
 data/outputs/*
+data/agent_state/*
 *.log
